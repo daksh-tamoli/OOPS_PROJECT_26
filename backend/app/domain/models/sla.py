@@ -61,21 +61,36 @@ class SLAStatusTracker:
         self.resolved_at = resolved_at
         self.is_breached = is_breached
 
+    @staticmethod
+    def _to_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     def mark_responded(self, timestamp: Optional[datetime] = None) -> None:
-        self.responded_at = timestamp or datetime.now(timezone.utc)
-        if self.responded_at > self.response_deadline:
+        self.responded_at = self._to_utc(timestamp or datetime.now(timezone.utc))
+        deadline = self._to_utc(self.response_deadline)
+        if deadline and self.responded_at > deadline:
             self.is_breached = True
 
     def mark_resolved(self, timestamp: Optional[datetime] = None) -> None:
-        self.resolved_at = timestamp or datetime.now(timezone.utc)
-        if self.resolved_at > self.resolution_deadline:
+        self.resolved_at = self._to_utc(timestamp or datetime.now(timezone.utc))
+        deadline = self._to_utc(self.resolution_deadline)
+        if deadline and self.resolved_at > deadline:
             self.is_breached = True
 
     def check_breach(self, current_time: Optional[datetime] = None) -> bool:
-        now = current_time or datetime.now(timezone.utc)
-        if self.responded_at is None and now > self.response_deadline:
+        now = self._to_utc(current_time or datetime.now(timezone.utc))
+        resp_dl = self._to_utc(self.response_deadline)
+        reso_dl = self._to_utc(self.resolution_deadline)
+        resp_at = self._to_utc(self.responded_at)
+        reso_at = self._to_utc(self.resolved_at)
+
+        if resp_at is None and resp_dl and now > resp_dl:
             self.is_breached = True
-        if self.resolved_at is None and now > self.resolution_deadline:
+        if reso_at is None and reso_dl and now > reso_dl:
             self.is_breached = True
         return self.is_breached
 
@@ -83,7 +98,13 @@ class SLAStatusTracker:
         """Flags incident if elapsed resolution time exceeds warning_ratio (e.g. 70%)."""
         if self.resolved_at is not None:
             return False
-        now = current_time or datetime.now(timezone.utc)
-        total_duration = (self.resolution_deadline - self.created_at).total_seconds()
-        elapsed = (now - self.created_at).total_seconds()
+        now = self._to_utc(current_time or datetime.now(timezone.utc))
+        created = self._to_utc(self.created_at)
+        reso_dl = self._to_utc(self.resolution_deadline)
+
+        if not created or not reso_dl:
+            return False
+
+        total_duration = (reso_dl - created).total_seconds()
+        elapsed = (now - created).total_seconds()
         return (elapsed / total_duration) >= warning_ratio if total_duration > 0 else False

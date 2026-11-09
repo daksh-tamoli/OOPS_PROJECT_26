@@ -37,7 +37,10 @@ class AutomaticEscalationEngine:
 
         # Check if response SLA is breached while still unacknowledged
         if incident.status in (IncidentStatus.NEW, IncidentStatus.CLASSIFIED, IncidentStatus.ASSIGNED):
-            if now > tracker.response_deadline:
+            now_utc = now if now.tzinfo else now.replace(tzinfo=timezone.utc)
+            deadline = tracker.response_deadline
+            deadline_utc = deadline if (deadline and deadline.tzinfo) else (deadline.replace(tzinfo=timezone.utc) if deadline else None)
+            if deadline_utc and now_utc > deadline_utc:
                 level = EscalationLevel.LEVEL_2_TEAM_LEAD if incident.priority != Priority.P1 else EscalationLevel.LEVEL_4_IT_MANAGER
                 msg = f"Automatic Escalation: Incident unacknowledged past response deadline. Escalated to {level}."
                 incident.record_action(
