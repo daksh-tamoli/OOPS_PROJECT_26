@@ -30,10 +30,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-Memory Repositories & Services (Thread-safe singletons for app lifespan)
-incident_repo = InMemoryIncidentRepository()
-user_repo = InMemoryUserRepository()
-service_repo = InMemoryServiceRepository()
+# Repositories & Services with SQLite Persistent Storage (Repository Pattern)
+from backend.app.infrastructure.persistence.sqlite_repo import (
+    init_sqlite_db, SqliteUserRepository, SqliteServiceRepository, SqliteIncidentRepository
+)
+
+session_factory = init_sqlite_db("sqlite:///backend/itsm.db")
+user_repo = SqliteUserRepository(session_factory)
+service_repo = SqliteServiceRepository(session_factory)
+incident_repo = SqliteIncidentRepository(session_factory, user_repo, service_repo)
 incident_service = IncidentService(incident_repo, user_repo, service_repo)
 
 
