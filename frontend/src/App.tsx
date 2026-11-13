@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   AlertTriangle, CheckCircle2, Clock, Search, Shield, User, Wrench, 
-  PlusCircle, RefreshCw, Activity, Check, X, FileText, Sparkles
+  PlusCircle, RefreshCw, Activity, Check, X, FileText
 } from 'lucide-react';
 
 interface Incident {
@@ -502,7 +502,7 @@ export function App() {
               {/* State Machine Visualizer */}
               <div style={{ background: 'rgba(0,0,0,0.3)', padding: '12px 14px', borderRadius: 8, marginBottom: 18, border: '1px solid var(--border-subtle)' }}>
                 <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 6, textTransform: 'uppercase', fontWeight: 600 }}>
-                  Lifecycle State Machine (State Pattern)
+                  Incident Progression Lifecycle
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                   {['NEW', 'CLASSIFIED', 'ASSIGNED', 'ACKNOWLEDGED', 'IN_PROGRESS', 'RESOLVED', 'VERIFIED', 'CLOSED'].map((st, idx) => {
@@ -618,10 +618,10 @@ export function App() {
                 )}
               </div>
 
-              {/* Immutable Audit Log Trail (Observer Pattern) */}
+              {/* Audit Log Trail */}
               <div>
                 <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase' }}>
-                  Immutable Audit Trail ({selectedIncident.audit_logs.length} entries)
+                  Activity & Audit Trail ({selectedIncident.audit_logs.length} entries)
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 220, overflowY: 'auto' }}>
                   {selectedIncident.audit_logs.map(log => (
@@ -653,8 +653,8 @@ export function App() {
             
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <Sparkles size={20} color="var(--accent-cyan)" />
-                <h2 style={{ fontSize: 18, fontWeight: 700 }}>Report IT Incident</h2>
+                <FileText size={20} color="var(--accent-cyan)" />
+                <h2 style={{ fontSize: 18, fontWeight: 700 }}>Report New Incident</h2>
               </div>
               <button onClick={() => setIsReportModalOpen(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
                 <X size={20} />
@@ -665,10 +665,10 @@ export function App() {
             {detectedDuplicates.length > 0 && (
               <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid rgba(239, 68, 68, 0.4)', borderRadius: 8, padding: '12px 16px', marginBottom: 18 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#fca5a5', fontWeight: 600, fontSize: 13, marginBottom: 4 }}>
-                  <AlertTriangle size={16} /> Intelligent Duplicate Detection Triggered!
+                  <AlertTriangle size={16} /> Possible Duplicate Incident Detected
                 </div>
                 <p style={{ fontSize: 12, color: '#fecdd3' }}>
-                  The system detected an existing active incident with <strong>{(detectedDuplicates[0].similarity * 100).toFixed(1)}% similarity</strong>:
+                  A similar incident is already open with <strong>{(detectedDuplicates[0].similarity * 100).toFixed(0)}% match</strong>:
                   <br />
                   <span style={{ fontFamily: 'JetBrains Mono' }}>{detectedDuplicates[0].id}: {detectedDuplicates[0].title}</span>
                 </p>
@@ -715,7 +715,7 @@ export function App() {
 
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                  Detailed Description (NLP Auto-Categorization Enabled)
+                  Issue Description & Diagnostic Details
                 </label>
                 <textarea 
                   required
@@ -759,17 +759,17 @@ export function App() {
 
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                  Technician Assignment Strategy (Strategy Pattern)
+                  Assignment Routing Method
                 </label>
                 <select 
                   value={newStrategy} 
                   onChange={e => setNewStrategy(e.target.value)}
                   style={{ width: '100%', padding: '8px 10px', borderRadius: 6, background: 'rgba(255,255,255,0.06)', border: '1px solid var(--border-subtle)', color: '#fff', fontSize: 13 }}
                 >
-                  <option value="smart">Composite Smart Assignment (Skill + Load + Rating)</option>
-                  <option value="skill">Skill-Based Assignment</option>
-                  <option value="load">Least-Loaded Assignment</option>
-                  <option value="round_robin">Round-Robin Assignment</option>
+                  <option value="smart">Auto: Balanced Routing (Skill, Load & Rating)</option>
+                  <option value="skill">Skill-Based Routing</option>
+                  <option value="load">Least-Loaded Routing</option>
+                  <option value="round_robin">Round-Robin Distribution</option>
                 </select>
               </div>
 
