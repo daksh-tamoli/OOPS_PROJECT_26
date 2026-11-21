@@ -7,8 +7,16 @@ from backend.app.domain.strategies.assignment import (
 from backend.app.domain.strategies.priority import MatrixPriorityStrategy, WeightedCriticalityStrategy
 from backend.app.domain.intelligence.duplicate_detector import DuplicateIncidentDetector
 from backend.app.domain.intelligence.escalation_engine import AutomaticEscalationEngine
-from backend.app.domain.observers.concrete import AuditObserver, NotificationObserver
-from backend.app.domain.exceptions import EntityNotFoundException, UnauthorizedActionException
+from backend.app.domain.intelligence.resolution_recommender import ResolutionRecommender
+from backend.app.domain.observers.concrete import AuditObserver, NotificationObserver, InAppNotificationObserver
+from backend.app.domain.exceptions import (
+    EntityNotFoundException,
+    ServiceNotFoundException,
+    InvalidIncidentException,
+    UnauthorizedActionException,
+    WorkloadExceededException,
+    MissingSLAConfigException
+)
 from backend.app.domain.models.incident import Incident
 from backend.app.domain.models.enums import UserRole, Impact, Urgency, Priority
 
@@ -32,6 +40,10 @@ class IncidentService:
         self.factory = IncidentFactory(priority_strategy=WeightedCriticalityStrategy())
         self.duplicate_detector = DuplicateIncidentDetector()
         self.escalation_engine = AutomaticEscalationEngine()
+        self.resolution_recommender = ResolutionRecommender()
+
+        # Dynamic Default Assignment Strategy Configurable by Admin
+        self.default_assignment_strategy: str = "smart"
 
         # Assignment Strategies lookup (Strategy Pattern)
         self.assignment_strategies: Dict[str, IAssignmentStrategy] = {
@@ -41,9 +53,21 @@ class IncidentService:
             "smart": CompositeSmartAssignment(),
         }
 
-        # Global Observers
+        # Global Observers: Distinct Channels (Email Outbox + In-App Notification Center)
         self.audit_observer = AuditObserver()
         self.notification_observer = NotificationObserver()
+        self.in_app_notification_observer = InAppNotificationObserver()
+
+    def set_default_assignment_strategy(self, strategy: str) -> None:
+        """Admin dynamic configuration: switch the active assignment strategy."""
+        normalized = strategy.lower().replace("-", "_")
+        if normalized not in self.assignment_strategies:
+            normalized = "smart"
+        self.default_assignment_strategy = normalized
+
+    def get_default_assignment_strategy(self) -> str:
+        return self.default_assignment_strategy
+
 
     def report_incident(
         self,
@@ -59,7 +83,7 @@ class IncidentService:
     ) -> Tuple[Incident, List[Tuple[Incident, float]]]:
         service = self.service_repo.get_by_id(service_id)
         if not service:
-            raise EntityNotFoundException(f"Service with ID '{service_id}' not found.")
+            raise ServiceNotFoundException(f"Service with ID '{service_id}' not found.")
 
         reporter = self.user_repo.get_by_id(reporter_id)
         if not reporter:
@@ -76,12 +100,14 @@ class IncidentService:
             category=category
         )
 
-        # Attach observers
+        # Attach observers (Distinct Channels: Audit, External Email, In-App Center)
         incident.attach_observer(self.audit_observer)
         incident.attach_observer(self.notification_observer)
+        incident.attach_observer(self.in_app_notification_observer)
 
         # Notify initial creation
         self.notification_observer.on_incident_created(incident)
+        self.in_app_notification_observer.on_incident_created(incident)
 
         # Intelligent feature 1: Check for duplicates
         existing_incidents = self.incident_repo.get_all()
@@ -192,11 +218,36 @@ class IncidentService:
     def get_incident(self, incident_id: str) -> Incident:
         inc = self.incident_repo.get_by_id(incident_id)
         if not inc:
-            raise EntityNotFoundException(f"Incident '{incident_id}' not found.")
+            raise InvalidIncidentException(f"Incident '{incident_id}' not found.")
         # Ensure observers are hooked up
         inc.attach_observer(self.audit_observer)
         inc.attach_observer(self.notification_observer)
+        inc.attach_observer(self.in_app_notification_observer)
         return inc
+
+    def request_additional_info(self, incident_id: str, technician_id: str, question: str) -> Incident:
+        """Technician requests additional clarification or diagnostic information from reporter."""
+        incident = self.get_incident(incident_id)
+        tech = self.user_repo.get_by_id(technician_id)
+        if not tech or tech.role != UserRole.TECHNICIAN:
+            raise UnauthorizedActionException("Only an assigned technician can request additional info.")
+        formatted_note = f"[INFO REQUESTED by {tech.full_name}]: {question}"
+        incident.investigation_notes.append(formatted_note)
+        incident.record_action(tech, "INFO_REQUESTED", formatted_note)
+        self.incident_repo.save(incident)
+        return incident
+
+    def add_additional_info(self, incident_id: str, actor_id: str, info_text: str) -> Incident:
+        """Reporter or Employee adds additional info or responds to technician questions."""
+        incident = self.get_incident(incident_id)
+        actor = self.user_repo.get_by_id(actor_id)
+        if not actor:
+            raise EntityNotFoundException("Actor not found.")
+        formatted_note = f"[ADDITIONAL INFO from {actor.full_name}]: {info_text}"
+        incident.investigation_notes.append(formatted_note)
+        incident.record_action(actor, "INFO_PROVIDED", formatted_note)
+        self.incident_repo.save(incident)
+        return incident
 
     def run_sla_and_escalation_cycle(self) -> Dict[str, Any]:
         """Periodic SLA checker and automatic escalation engine runner."""
@@ -271,3 +322,80 @@ class IncidentService:
             "service_analysis": service_breakdown,
             "category_analysis": category_breakdown
         }
+
+    def get_suggested_resolutions(self, incident_id: str) -> List[Dict[str, Any]]:
+        """
+        Retrieves suggested resolutions for an incident (Feature G & Innovation Pillar).
+        Leverages NLP matching against historical resolved incidents and expert SOP runbooks.
+        """
+        incident = self.get_incident(incident_id)
+        all_incidents = self.incident_repo.get_all()
+        return self.resolution_recommender.get_recommendations(incident, all_incidents)
+
+    def get_service_topology(self) -> Dict[str, Any]:
+        """
+        Builds live service dependency topology graph and operational health status.
+        Demonstrates Incident Correlation & Service Dependency Graph (Innovation Pillar).
+        """
+        services = self.service_repo.get_all()
+        incidents = self.incident_repo.get_all()
+
+        active_per_service: Dict[str, List[Incident]] = {}
+        for inc in incidents:
+            if inc.status.value not in ("RESOLVED", "VERIFIED", "CLOSED"):
+                s_id = inc.service.id
+                if s_id not in active_per_service:
+                    active_per_service[s_id] = []
+                active_per_service[s_id].append(inc)
+
+        nodes = []
+        edges = []
+
+        for s in services:
+            active_list = active_per_service.get(s.id, [])
+            critical_count = len([i for i in active_list if i.priority.value == "P1"])
+            open_count = len(active_list)
+
+            if critical_count > 0:
+                health = "CRITICAL"
+            elif open_count > 0:
+                health = "DEGRADED"
+            else:
+                health = "OPERATIONAL"
+
+            nodes.append({
+                "id": s.id,
+                "name": s.name,
+                "tier": s.tier.value if hasattr(s.tier, "value") else str(s.tier),
+                "description": s.description,
+                "health": health,
+                "active_incidents": open_count,
+                "critical_incidents": critical_count,
+                "dependencies": s.dependencies
+            })
+
+            for dep_id in s.dependencies:
+                edges.append({
+                    "from": s.id,
+                    "to": dep_id,
+                    "label": "depends_on"
+                })
+
+        service_map = {n["id"]: n for n in nodes}
+        for n in nodes:
+            if n["health"] == "OPERATIONAL":
+                for dep_id in n["dependencies"]:
+                    dep_node = service_map.get(dep_id)
+                    if dep_node and dep_node["health"] == "CRITICAL":
+                        n["health"] = "IMPACTED"
+                        n["cascade_reason"] = f"Upstream dependency '{dep_node['name']}' is CRITICAL"
+                        break
+
+        return {
+            "nodes": nodes,
+            "edges": edges,
+            "total_services": len(nodes),
+            "degraded_services": len([n for n in nodes if n["health"] in ("CRITICAL", "DEGRADED", "IMPACTED")]),
+            "operational_services": len([n for n in nodes if n["health"] == "OPERATIONAL"])
+        }
+

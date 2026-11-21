@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 from typing import List, Optional
 from sqlalchemy import (
-    create_engine, Column, String, Integer, Float, Boolean, DateTime, Text, ForeignKey, JSON
+    create_engine, Column, String, Integer, Float, Boolean, DateTime, Text, ForeignKey, JSON, text
 )
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
@@ -51,6 +51,8 @@ class ServiceModel(Base):
     description = Column(Text, nullable=True)
     tier = Column(String(32), default=ServiceTier.TIER_2.value)
     is_active = Column(Boolean, default=True)
+    dependencies = Column(Text, default="[]")
+
 
 
 class IncidentModel(Base):
@@ -411,6 +413,10 @@ class SqliteServiceRepository(IServiceRepository):
             model.description = service.description
             model.tier = service.tier.value if hasattr(service.tier, "value") else service.tier
             model.is_active = service.is_active
+            try:
+                model.dependencies = json.dumps(service.dependencies)
+            except Exception:
+                model.dependencies = "[]"
             session.commit()
             return service
 
@@ -419,32 +425,56 @@ class SqliteServiceRepository(IServiceRepository):
             model = session.query(ServiceModel).filter_by(id=service_id).first()
             if not model:
                 return None
+            deps = []
+            try:
+                if hasattr(model, "dependencies") and model.dependencies:
+                    deps = json.loads(model.dependencies)
+            except Exception:
+                deps = []
             return ITService(
                 name=model.name,
                 description=model.description,
                 tier=ServiceTier(model.tier),
                 service_id=model.id,
-                is_active=model.is_active
+                is_active=model.is_active,
+                dependencies=deps
             )
 
     def get_all(self) -> List[ITService]:
         with self.session_factory() as session:
             models = session.query(ServiceModel).filter_by(is_active=True).all()
-            return [
-                ITService(
-                    name=m.name,
-                    description=m.description,
-                    tier=ServiceTier(m.tier),
-                    service_id=m.id,
-                    is_active=m.is_active
+            result = []
+            for m in models:
+                deps = []
+                try:
+                    if hasattr(m, "dependencies") and m.dependencies:
+                        deps = json.loads(m.dependencies)
+                except Exception:
+                    deps = []
+                result.append(
+                    ITService(
+                        name=m.name,
+                        description=m.description,
+                        tier=ServiceTier(m.tier),
+                        service_id=m.id,
+                        is_active=m.is_active,
+                        dependencies=deps
+                    )
                 )
-                for m in models
-            ]
+            return result
 
 
 def init_sqlite_db(db_path: str = "sqlite:///backend/itsm.db"):
     """Initializes SQLite database and tables."""
     engine = create_engine(db_path, connect_args={"check_same_thread": False})
     Base.metadata.create_all(engine)
+    # Automatic non-destructive schema migration for SQLite
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE services ADD COLUMN dependencies TEXT DEFAULT '[]'"))
+            conn.commit()
+    except Exception:
+        pass  # Column already exists
     session_factory = sessionmaker(bind=engine, autoflush=False, autocommit=False)
     return session_factory
+

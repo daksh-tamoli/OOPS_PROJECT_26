@@ -28,3 +28,17 @@ class IntelligentCategorizer:
                 best_category = category
 
         return best_category
+
+    @classmethod
+    def get_all_categories(cls) -> Dict[str, List[str]]:
+        """Returns all configured categories and their NLP detection keywords."""
+        return {
+            (cat.value if hasattr(cat, "value") else str(cat)): keywords
+            for cat, keywords in cls._CATEGORY_KEYWORDS.items()
+        }
+
+    @classmethod
+    def add_or_update_category(cls, category_name: str, keywords: List[str]) -> None:
+        """Dynamically register or update a custom category and its keywords."""
+        cat_key = category_name.upper().replace(" ", "_")
+        cls._CATEGORY_KEYWORDS[cat_key] = [k.strip().lower() for k in keywords if k.strip()]

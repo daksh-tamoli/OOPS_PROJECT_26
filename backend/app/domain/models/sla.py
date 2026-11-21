@@ -1,5 +1,5 @@
 from datetime import datetime, timezone, timedelta
-from typing import Dict, Optional
+from typing import Dict, Optional, Any
 import uuid
 from backend.app.domain.models.enums import Priority
 
@@ -39,6 +39,23 @@ class SLAPolicy:
 
     def get_target(self, priority: Priority) -> SLATarget:
         return self.targets.get(priority, self.targets[Priority.P3])
+
+    def update_target(self, priority: Priority, response_minutes: int, resolution_minutes: int) -> None:
+        """Dynamically update SLA target for a specific priority tier."""
+        self.targets[priority] = SLATarget(response_minutes=response_minutes, resolution_minutes=resolution_minutes)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "id": self.id,
+            "name": self.name,
+            "targets": {
+                p.value: {
+                    "response_minutes": self.targets[p].response_minutes,
+                    "resolution_minutes": self.targets[p].resolution_minutes
+                }
+                for p in self.targets
+            }
+        }
 
 
 class SLAStatusTracker:

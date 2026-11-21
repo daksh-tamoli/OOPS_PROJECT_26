@@ -58,8 +58,13 @@ def test_setup():
         name="Internal Email", description="Company exchange",
         tier=ServiceTier.TIER_3
     )
+    srv_db = ITService(
+        name="Core PostgreSQL DB", description="Database service",
+        tier=ServiceTier.TIER_1_CRITICAL
+    )
     service_repo.save(srv_payment)
     service_repo.save(srv_email)
+    service_repo.save(srv_db)
 
     service = IncidentService(incident_repo, user_repo, service_repo)
     return {
@@ -70,8 +75,10 @@ def test_setup():
         "admin": admin,
         "srv_payment": srv_payment,
         "srv_email": srv_email,
+        "srv_db": srv_db,
         "repos": (incident_repo, user_repo, service_repo)
     }
+
 
 
 # ==============================================================================
@@ -488,6 +495,189 @@ def test_tc21_email_verification_and_enterprise_password_strength():
     assert "482910" in mail.body_html
     assert "newuser@enterprise.org" in mail.to_addresses
     assert mail.status in ("DELIVERED_OUTBOX", "DELIVERED_SMTP")
+
+
+def test_tc22_suggested_resolution_recommendation(test_setup):
+    """Requirement: Intelligent Suggested Resolution Engine (Feature G & Innovation Challenge)."""
+    from backend.app.domain.intelligence.resolution_recommender import ResolutionRecommender
+    recommender = ResolutionRecommender()
+
+    # Create a historical incident that was resolved with verified diagnostic steps
+    factory = IncidentFactory()
+    hist_inc = factory.create_incident(
+        title="PostgreSQL connection pool exhausted deadlock",
+        description="Transactions hanging with deadlock errors",
+        service=test_setup["srv_db"],
+        reporter=test_setup["emp"],
+        category="Database"
+    )
+    hist_inc.assign(test_setup["tech_db"], test_setup["emp"])
+    hist_inc.acknowledge(test_setup["tech_db"])
+    hist_inc.start_investigation("Inspecting pg_stat_activity", test_setup["tech_db"])
+    hist_inc.resolve("Terminated blocking PID 4120 and increased PgBouncer pool to 200.", test_setup["tech_db"])
+
+
+    # Create a new active target incident with similar database deadlock symptoms
+    target_inc = factory.create_incident(
+        title="Postgres DB deadlock blocking checkout queries",
+        description="Checkout transactions timing out on postgres database",
+        service=test_setup["srv_db"],
+        reporter=test_setup["emp"],
+        category="Database"
+    )
+
+    recommendations = recommender.get_recommendations(target_inc, [hist_inc])
+    assert len(recommendations) >= 1
+    # Check that historical resolution was retrieved with high confidence
+    hist_match = [r for r in recommendations if r["source"] == "HISTORICAL_KB"]
+    assert len(hist_match) > 0
+    assert "Terminated blocking PID 4120" in hist_match[0]["steps"]
+    assert hist_match[0]["matched_incident_id"] == hist_inc.id
+
+
+def test_tc23_service_dependency_topology(test_setup):
+    """Requirement: Service Dependency Graph & Failure Impact Propagation (Innovation Pillar)."""
+    from backend.app.infrastructure.persistence.in_memory_repo import (
+        InMemoryIncidentRepository, InMemoryUserRepository, InMemoryServiceRepository
+    )
+    from backend.app.services.incident_service import IncidentService
+
+    inc_repo = InMemoryIncidentRepository()
+    usr_repo = InMemoryUserRepository()
+    srv_repo = InMemoryServiceRepository()
+
+    # Seed services with dependency hierarchy
+    srv_db = test_setup["srv_db"]
+    srv_payment = test_setup["srv_payment"]
+    srv_payment.add_dependency(srv_db.id)
+
+    srv_repo.save(srv_db)
+    srv_repo.save(srv_payment)
+    usr_repo.save(test_setup["emp"])
+
+    service = IncidentService(inc_repo, usr_repo, srv_repo)
+
+    # Topology when healthy
+    topo = service.get_service_topology()
+    assert topo["total_services"] == 2
+    assert topo["operational_services"] == 2
+
+    # Now create a critical P1 incident on Core Database
+    inc_db, _ = service.report_incident(
+        title="Total Database Cluster Outage",
+        description="Master DB node kernel panic",
+        service_id=srv_db.id,
+        reporter_id=test_setup["emp"].id,
+        impact=Impact.CRITICAL,
+        urgency=Urgency.CRITICAL,
+        category="Database",
+        auto_assign=False
+    )
+    assert inc_db.priority == Priority.P1
+
+    # Re-evaluate topology: DB is CRITICAL and Payment Gateway cascades to IMPACTED
+    topo_after = service.get_service_topology()
+    node_map = {n["id"]: n for n in topo_after["nodes"]}
+    assert node_map[srv_db.id]["health"] == "CRITICAL"
+    assert node_map[srv_payment.id]["health"] == "IMPACTED"
+    assert "Upstream dependency" in node_map[srv_payment.id]["cascade_reason"]
+
+
+def test_tc24_all_12_custom_exceptions_verification():
+    """Requirement: Explicit custom exception handling for all 12 rubric failure cases."""
+    from backend.app.domain.exceptions import (
+        DomainException,
+        InvalidLoginException,
+        UnauthorizedActionException,
+        UnauthorizedOperationException,
+        InvalidIncidentException,
+        InvalidStateTransitionException,
+        TechnicianUnavailableException,
+        WorkloadExceededException,
+        TechnicianCapacityExceededException,
+        ServiceNotFoundException,
+        MissingSLAConfigException,
+        DuplicateIncidentException,
+        DatabaseFailureException,
+        NetworkFailureException,
+        InvalidUserInputException
+    )
+
+    exceptions_to_verify = [
+        InvalidLoginException("1. Invalid login attempt"),
+        UnauthorizedActionException("2. Unauthorized operation"),
+        InvalidIncidentException("3. Invalid incident"),
+        InvalidStateTransitionException("NEW", "CLOSED", "4. Invalid state transition"),
+        TechnicianUnavailableException("5. Technician unavailable"),
+        WorkloadExceededException("6. Workload exceeded"),
+        ServiceNotFoundException("7. Service not found"),
+        MissingSLAConfigException("8. Missing SLA config"),
+        DuplicateIncidentException("9. Duplicate incident"),
+        DatabaseFailureException("10. Database connection failure"),
+        NetworkFailureException("11. Network connectivity failure"),
+        InvalidUserInputException("12. Invalid user input")
+    ]
+
+    for exc in exceptions_to_verify:
+        assert isinstance(exc, DomainException)
+        assert len(str(exc)) > 0
+
+    # Verify Aliases
+    assert UnauthorizedOperationException is UnauthorizedActionException
+    assert TechnicianCapacityExceededException is WorkloadExceededException
+
+
+def test_tc25_dual_notification_channels_verification(test_setup):
+    """Requirement: Two distinct notification mechanisms (Channel 1: SMTP Outbox + Channel 2: In-App Dashboard Center)."""
+    from backend.app.infrastructure.persistence.in_memory_repo import (
+        InMemoryIncidentRepository, InMemoryUserRepository, InMemoryServiceRepository
+    )
+    from backend.app.services.incident_service import IncidentService
+
+    inc_repo = InMemoryIncidentRepository()
+    usr_repo = InMemoryUserRepository()
+    srv_repo = InMemoryServiceRepository()
+
+    srv = test_setup["srv_db"]
+    emp = test_setup["emp"]
+    tech = test_setup["tech_db"]
+
+    srv_repo.save(srv)
+    usr_repo.save(emp)
+    usr_repo.save(tech)
+
+    service = IncidentService(inc_repo, usr_repo, srv_repo)
+
+    # Report incident
+    inc, _ = service.report_incident(
+        title="Network Gateway Unreachable",
+        description="Switch dropped all packets",
+        service_id=srv.id,
+        reporter_id=emp.id,
+        impact=Impact.HIGH,
+        urgency=Urgency.HIGH,
+        category="Network",
+        auto_assign=True,
+        assignment_strategy="skill"
+    )
+
+    # 1. Verify Channel 1: Outbox dispatches
+    outbox_notifs = service.notification_observer.dispatched_notifications
+    assert len(outbox_notifs) >= 1
+    assert any(n["incident_id"] == inc.id for n in outbox_notifs)
+
+    # 2. Verify Channel 2: In-App Notification Center
+    in_app_notifs = service.in_app_notification_observer.get_user_notifications(emp.id)
+    assert len(in_app_notifs) >= 1
+    target_notif = in_app_notifs[0]
+    assert target_notif["incident_id"] == inc.id
+    assert target_notif["is_read"] is False
+
+    # Mark as read
+    marked = service.in_app_notification_observer.mark_as_read(target_notif["id"])
+    assert marked is True
+    assert target_notif["is_read"] is True
+
 
 
 

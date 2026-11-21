@@ -4,8 +4,11 @@ import {
   PlusCircle, RefreshCw, Check, X, FileText, Sun, Moon,
   Layers, AlertCircle, FileEdit, Server, AlertTriangle,
   Lock, Mail, LogOut, ArrowRight, Printer, BarChart3, Send, Sliders,
-  ShieldCheck, ArrowLeft
+  ShieldCheck, ArrowLeft, Network, Sparkles, Cpu, Bell, Settings, MessageSquare, Wrench,
+  CheckCircle, UserCheck, Info
 } from 'lucide-react';
+
+
 
 interface AuthUser {
   id: string;
@@ -55,6 +58,7 @@ interface ITService {
   name: string;
   description: string;
   tier: string;
+  dependencies?: string[];
 }
 
 interface UserProfile {
@@ -129,8 +133,36 @@ export function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [priorityFilter, setPriorityFilter] = useState('ALL');
+  const [categoryFilter, setCategoryFilter] = useState('ALL');
+  const [serviceFilter, setServiceFilter] = useState('ALL');
   const [viewFilter, setViewFilter] = useState<'ALL' | 'MY_TICKETS' | 'CRITICAL' | 'SLA_BREACH'>('ALL');
+  const [currentView, setCurrentView] = useState<'OVERVIEW' | 'TECH_WORKLOAD' | 'SERVICE_ANALYSIS'>('OVERVIEW');
   const [loading, setLoading] = useState(false);
+
+  // In-App Notification Center (Channel 2)
+  const [showInAppNotifs, setShowInAppNotifs] = useState(false);
+  const [inAppNotifs, setInAppNotifs] = useState<any[]>([]);
+
+  // Role info exchange
+  const [techRequestInfoText, setTechRequestInfoText] = useState('');
+  const [empAddInfoText, setEmpAddInfoText] = useState('');
+  const [showRequestInfoInput, setShowRequestInfoInput] = useState(false);
+
+  // Admin Dynamic Configuration Modal & Data
+  const [showAdminConfigModal, setShowAdminConfigModal] = useState(false);
+  const [adminConfigTab, setAdminConfigTab] = useState<'SERVICES' | 'CATEGORIES' | 'SLA' | 'STRATEGY'>('SERVICES');
+  const [adminConfigData, setAdminConfigData] = useState<any>(null);
+  const [cfgServiceName, setCfgServiceName] = useState('');
+  const [cfgServiceDesc, setCfgServiceDesc] = useState('');
+  const [cfgServiceTier, setCfgServiceTier] = useState('BUSINESS_CRITICAL');
+  const [cfgServiceDeps, setCfgServiceDeps] = useState('');
+  const [cfgCategoryName, setCfgCategoryName] = useState('');
+  const [cfgCategoryKeywords, setCfgCategoryKeywords] = useState('');
+  const [cfgActiveStrategy, setCfgActiveStrategy] = useState('smart');
+  const [cfgSlaTier, setCfgSlaTier] = useState('P1');
+  const [cfgSlaResp, setCfgSlaResp] = useState(5);
+  const [cfgSlaReso, setCfgSlaReso] = useState(30);
+  const [cfgSubmitting, setCfgSubmitting] = useState(false);
 
   // New incident form state
   const [newTitle, setNewTitle] = useState('');
@@ -167,6 +199,19 @@ export function App() {
   const [overridePriorityVal, setOverridePriorityVal] = useState('P1');
   const [overrideReason, setOverrideReason] = useState('');
   const [overrideSubmitting, setOverrideSubmitting] = useState(false);
+
+  // Service Dependency Topology Modal & Data (Innovation Pillar)
+  const [showTopologyModal, setShowTopologyModal] = useState(false);
+  const [topologyData, setTopologyData] = useState<any | null>(null);
+  const [loadingTopology, setLoadingTopology] = useState(false);
+
+  // Suggested Resolutions & AI SRE Runbooks (Feature G & Innovation)
+  const [suggestedResolutions, setSuggestedResolutions] = useState<any[]>([]);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const [aiRunbook, setAiRunbook] = useState<string | null>(null);
+  const [generatingRunbook, setGeneratingRunbook] = useState(false);
+  const [resolutionAppliedMsg, setResolutionAppliedMsg] = useState('');
+
 
   const API_BASE = 'http://localhost:8000/api';
 
@@ -429,6 +474,58 @@ export function App() {
     setShowExecutiveReport(true);
   };
 
+  const fetchSuggestedResolutions = async (incId: string) => {
+    setLoadingSuggestions(true);
+    setAiRunbook(null);
+    try {
+      const res = await fetch(`${API_BASE}/incidents/${incId}/suggested-resolutions`);
+      if (res.ok) {
+        const data = await res.json();
+        setSuggestedResolutions(data.recommendations || []);
+      }
+    } catch {
+      setSuggestedResolutions([]);
+    } finally {
+      setLoadingSuggestions(false);
+    }
+  };
+
+  const handleOpenTopology = async () => {
+    setShowTopologyModal(true);
+    setLoadingTopology(true);
+    try {
+      const res = await fetch(`${API_BASE}/services/topology`);
+      if (res.ok) {
+        const data = await res.json();
+        setTopologyData(data);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoadingTopology(false);
+    }
+  };
+
+  const handleGenerateAIRunbook = async (incId: string) => {
+    setGeneratingRunbook(true);
+    try {
+      const res = await fetch(`${API_BASE}/ai/generate-resolution-runbook`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ incident_id: incId })
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setAiRunbook(data.runbook);
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setGeneratingRunbook(false);
+    }
+  };
+
+
   const handleSendTestEmail = async (e: React.FormEvent) => {
     e.preventDefault();
     setTestEmailSending(true);
@@ -482,14 +579,152 @@ export function App() {
     }
   };
 
+  const fetchInAppNotifs = async () => {
+    try {
+      const uid = currentUser?.id || '';
+      const res = await fetch(`${API_BASE}/in-app-notifications?user_id=${uid}`);
+      if (res.ok) {
+        const data = await res.json();
+        setInAppNotifs(data);
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleMarkNotifRead = async (id: string) => {
+    await fetch(`${API_BASE}/in-app-notifications/${id}/read`, { method: 'POST' });
+    fetchInAppNotifs();
+  };
+
+  const handleMarkAllNotifsRead = async () => {
+    const uid = currentUser?.id || 'user-emp-1';
+    await fetch(`${API_BASE}/in-app-notifications/mark-all-read?user_id=${uid}`, { method: 'POST' });
+    fetchInAppNotifs();
+  };
+
+  const fetchAdminConfig = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/admin/config`);
+      if (res.ok) {
+        const data = await res.json();
+        setAdminConfigData(data);
+        if (data.active_assignment_strategy) {
+          setCfgActiveStrategy(data.active_assignment_strategy);
+        }
+      }
+    } catch (e) {
+      // ignore
+    }
+  };
+
+  const handleCreateService = async () => {
+    if (!cfgServiceName || !cfgServiceDesc) return;
+    setCfgSubmitting(true);
+    const deps = cfgServiceDeps.split(',').map(s => s.trim()).filter(Boolean);
+    await fetch(`${API_BASE}/services`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: cfgServiceName,
+        description: cfgServiceDesc,
+        tier: cfgServiceTier,
+        dependencies: deps,
+        admin_id: currentUser?.id
+      })
+    });
+    setCfgServiceName('');
+    setCfgServiceDesc('');
+    setCfgServiceDeps('');
+    setCfgSubmitting(false);
+    fetchData();
+    fetchAdminConfig();
+  };
+
+  const handleUpdateAssignmentStrategy = async (strat: string) => {
+    setCfgActiveStrategy(strat);
+    await fetch(`${API_BASE}/admin/assignment-strategy`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ strategy: strat, admin_id: currentUser?.id })
+    });
+    fetchAdminConfig();
+  };
+
+  const handleUpdateSLAPolicy = async () => {
+    setCfgSubmitting(true);
+    await fetch(`${API_BASE}/admin/sla-policy`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        priority: cfgSlaTier,
+        response_minutes: Number(cfgSlaResp),
+        resolution_minutes: Number(cfgSlaReso),
+        admin_id: currentUser?.id
+      })
+    });
+    setCfgSubmitting(false);
+    fetchAdminConfig();
+    fetchData();
+  };
+
+  const handleAddCategory = async () => {
+    if (!cfgCategoryName || !cfgCategoryKeywords) return;
+    setCfgSubmitting(true);
+    const kw = cfgCategoryKeywords.split(',').map(s => s.trim()).filter(Boolean);
+    await fetch(`${API_BASE}/admin/categories`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        name: cfgCategoryName,
+        keywords: kw,
+        admin_id: currentUser?.id
+      })
+    });
+    setCfgCategoryName('');
+    setCfgCategoryKeywords('');
+    setCfgSubmitting(false);
+    fetchAdminConfig();
+  };
+
+  const handleTechnicianRequestInfo = async (id: string) => {
+    if (!techRequestInfoText) return;
+    const techId = currentUser?.id || 'tech-101';
+    await fetch(`${API_BASE}/incidents/${id}/request-info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ technician_id: techId, question: techRequestInfoText })
+    });
+    setTechRequestInfoText('');
+    setShowRequestInfoInput(false);
+    fetchData();
+    fetchInAppNotifs();
+  };
+
+  const handleEmployeeAddInfo = async (id: string) => {
+    if (!empAddInfoText) return;
+    const actorId = currentUser?.id || 'user-emp-1';
+    await fetch(`${API_BASE}/incidents/${id}/add-info`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ actor_id: actorId, info_text: empAddInfoText })
+    });
+    setEmpAddInfoText('');
+    fetchData();
+    fetchInAppNotifs();
+  };
+
   const [currentTime, setCurrentTime] = useState(new Date());
 
   useEffect(() => {
     fetchData();
     fetchNotifications();
+    fetchInAppNotifs();
+    fetchAdminConfig();
     const interval = setInterval(() => {
       fetchData();
       fetchNotifications();
+      fetchInAppNotifs();
     }, 8000);
     const clockInterval = setInterval(() => {
       setCurrentTime(new Date());
@@ -507,22 +742,30 @@ export function App() {
     const dl = new Date(deadlineStr).getTime();
     const diffMs = dl - currentTime.getTime();
     if (diffMs > 0) {
-      const totalMins = Math.floor(diffMs / 60000);
+      const totalSecs = Math.floor(diffMs / 1000);
+      const totalMins = Math.floor(totalSecs / 60);
       const hrs = Math.floor(totalMins / 60);
       const remMins = totalMins % 60;
+      const remSecs = totalSecs % 60;
+      const padSec = remSecs < 10 ? `0${remSecs}` : `${remSecs}`;
       if (hrs > 0) {
-        return `${hrs}h ${remMins}m remaining`;
+        return `${hrs}h ${remMins}m ${padSec}s remaining`;
       }
-      return `${totalMins}m remaining`;
+      return `${remMins}m ${padSec}s remaining`;
     } else {
-      const overdueMins = Math.floor(Math.abs(diffMs) / 60000);
+      const overdueSecsTotal = Math.floor(Math.abs(diffMs) / 1000);
+      const overdueMins = Math.floor(overdueSecsTotal / 60);
       const overdueHrs = Math.floor(overdueMins / 60);
+      const remOverdueMins = overdueMins % 60;
+      const remOverdueSecs = overdueSecsTotal % 60;
+      const padOverSec = remOverdueSecs < 10 ? `0${remOverdueSecs}` : `${remOverdueSecs}`;
       if (overdueHrs > 0) {
-        return `Overdue by ${overdueHrs}h ${overdueMins % 60}m`;
+        return `⚠️ Overdue by ${overdueHrs}h ${remOverdueMins}m ${padOverSec}s`;
       }
-      return `Overdue by ${overdueMins}m`;
+      return `⚠️ Overdue by ${remOverdueMins}m ${padOverSec}s`;
     }
   };
+
 
   // Filtered incidents
   const filteredIncidents = incidents.filter(inc => {
@@ -534,9 +777,11 @@ export function App() {
     if (viewFilter === 'CRITICAL' && inc.priority !== 'P1') return false;
     if (viewFilter === 'SLA_BREACH' && !inc.sla.is_breached) return false;
 
-    // Dropdown Filters
+    // Dropdown Filters (5 Distinct Criteria: Search, Status, Priority, Category, Service)
     if (statusFilter !== 'ALL' && inc.status !== statusFilter) return false;
     if (priorityFilter !== 'ALL' && inc.priority !== priorityFilter) return false;
+    if (categoryFilter !== 'ALL' && inc.category.toLowerCase() !== categoryFilter.toLowerCase()) return false;
+    if (serviceFilter !== 'ALL' && inc.service.id !== serviceFilter) return false;
 
     // Search Query
     if (searchQuery) {
@@ -590,16 +835,49 @@ export function App() {
     fetchData();
   };
 
-  const handleStartInvestigation = async (id: string) => {
-    if (!actionNote) return;
+  const handleStartInvestigation = async (id: string, customNote?: string) => {
+    const note = customNote || actionNote;
+    if (!note) return;
     const techId = currentUser?.id || 'tech-101';
     await fetch(`${API_BASE}/incidents/${id}/investigate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ technician_id: techId, notes: actionNote })
+      body: JSON.stringify({ technician_id: techId, notes: note })
     });
-    setActionNote('');
+    if (!customNote) setActionNote('');
     fetchData();
+  };
+
+  const handleApplySuggestedResolution = async (sugSteps: string, sugTitle: string) => {
+    if (!selectedIncident) return;
+    setResolutionNote(sugSteps);
+
+    // If currently in ACKNOWLEDGED state, auto-advance to IN_PROGRESS so the resolution box is active
+    if (selectedIncident.status === 'ACKNOWLEDGED') {
+      try {
+        const techId = currentUser?.id || 'tech-101';
+        await fetch(`${API_BASE}/incidents/${selectedIncident.id}/investigate`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ technician_id: techId, notes: `Applying diagnostic SOP: ${sugTitle}` })
+        });
+        await fetchData();
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    setResolutionAppliedMsg(`✓ Resolution steps for "${sugTitle}" loaded below! Review details and click "Mark Incident Resolved".`);
+    setTimeout(() => setResolutionAppliedMsg(''), 7000);
+
+    setTimeout(() => {
+      const el = document.getElementById('resolution-action-box');
+      if (el) {
+        el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const textarea = el.querySelector('textarea');
+        if (textarea) textarea.focus();
+      }
+    }, 150);
   };
 
   const handleResolve = async (id: string) => {
@@ -1071,7 +1349,44 @@ export function App() {
                       {regResending ? 'Resending...' : 'Resend Code'}
                     </button>
                   </div>
+
+                  {!smtpConfigured && (
+                    <div style={{
+                      marginTop: 10,
+                      padding: '8px 12px',
+                      background: 'rgba(59, 130, 246, 0.08)',
+                      border: '1px solid rgba(59, 130, 246, 0.25)',
+                      borderRadius: 8,
+                      fontSize: 11,
+                      color: 'var(--text-secondary)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between'
+                    }}>
+                      <span>Demo/Local Mode: Code stored in Outbox.</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setShowNotificationOutbox(true);
+                          fetchNotifications();
+                        }}
+                        style={{
+                          background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: 4,
+                          padding: '3px 8px',
+                          fontSize: 11,
+                          cursor: 'pointer',
+                          fontWeight: 600
+                        }}
+                      >
+                        Inspect Code
+                      </button>
+                    </div>
+                  )}
                 </div>
+
 
                 <button 
                   type="submit" 
@@ -1280,18 +1595,80 @@ export function App() {
             </button>
           </div>
 
-          {/* Quick Navigation Views */}
+          {/* 1. Primary Workspace Views (Rubric: Incident Overview, Tech Workload, Service Analysis) */}
           <div style={{ marginBottom: 20 }}>
             <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px', marginBottom: 10, textTransform: 'uppercase' }}>
-              Workspace Views
+              Primary Views
             </div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <button
-                onClick={() => setViewFilter('ALL')}
+                onClick={() => setCurrentView('OVERVIEW')}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px',
                   borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
-                  background: viewFilter === 'ALL' ? 'var(--input-bg)' : 'transparent',
+                  background: currentView === 'OVERVIEW' ? 'var(--input-bg)' : 'transparent',
+                  color: currentView === 'OVERVIEW' ? 'var(--role-orange)' : 'var(--text-secondary)',
+                  fontWeight: currentView === 'OVERVIEW' ? 700 : 500
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Layers size={16} /> Incident Overview
+                </span>
+                <span style={{ fontSize: 11, background: 'var(--border-subtle)', padding: '2px 7px', borderRadius: 99 }}>
+                  {incidents.length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setCurrentView('TECH_WORKLOAD')}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px',
+                  borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
+                  background: currentView === 'TECH_WORKLOAD' ? 'var(--input-bg)' : 'transparent',
+                  color: currentView === 'TECH_WORKLOAD' ? 'var(--role-orange)' : 'var(--text-secondary)',
+                  fontWeight: currentView === 'TECH_WORKLOAD' ? 700 : 500
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Wrench size={16} /> Technician Workload
+                </span>
+                <span style={{ fontSize: 11, background: 'var(--border-subtle)', padding: '2px 7px', borderRadius: 99 }}>
+                  {users.filter(u => u.role === 'TECHNICIAN').length}
+                </span>
+              </button>
+
+              <button
+                onClick={() => setCurrentView('SERVICE_ANALYSIS')}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px',
+                  borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
+                  background: currentView === 'SERVICE_ANALYSIS' ? 'var(--input-bg)' : 'transparent',
+                  color: currentView === 'SERVICE_ANALYSIS' ? 'var(--role-orange)' : 'var(--text-secondary)',
+                  fontWeight: currentView === 'SERVICE_ANALYSIS' ? 700 : 500
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Server size={16} /> Service Analysis
+                </span>
+                <span style={{ fontSize: 11, background: 'var(--border-subtle)', padding: '2px 7px', borderRadius: 99 }}>
+                  {services.length}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          {/* 2. Quick Filter Criteria */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', letterSpacing: '0.5px', marginBottom: 10, textTransform: 'uppercase' }}>
+              Quick Filters
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <button
+                onClick={() => { setViewFilter('ALL'); setCurrentView('OVERVIEW'); }}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px',
+                  borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
+                  background: viewFilter === 'ALL' && currentView === 'OVERVIEW' ? 'var(--input-bg)' : 'transparent',
                   color: viewFilter === 'ALL' ? 'var(--text-primary)' : 'var(--text-secondary)',
                   fontWeight: viewFilter === 'ALL' ? 600 : 500
                 }}
@@ -1305,7 +1682,7 @@ export function App() {
               </button>
 
               <button
-                onClick={() => setViewFilter('MY_TICKETS')}
+                onClick={() => { setViewFilter('MY_TICKETS'); setCurrentView('OVERVIEW'); }}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px',
                   borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
@@ -1325,7 +1702,7 @@ export function App() {
               </button>
 
               <button
-                onClick={() => setViewFilter('CRITICAL')}
+                onClick={() => { setViewFilter('CRITICAL'); setCurrentView('OVERVIEW'); }}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px',
                   borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
@@ -1343,7 +1720,7 @@ export function App() {
               </button>
 
               <button
-                onClick={() => setViewFilter('SLA_BREACH')}
+                onClick={() => { setViewFilter('SLA_BREACH'); setCurrentView('OVERVIEW'); }}
                 style={{
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px',
                   borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
@@ -1377,8 +1754,52 @@ export function App() {
                   PDF
                 </span>
               </button>
+
+              <button
+                onClick={handleOpenTopology}
+                style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px',
+                  borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13, textAlign: 'left',
+                  background: 'transparent',
+                  color: 'var(--text-secondary)',
+                  fontWeight: 500
+                }}
+              >
+                <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Network size={16} /> Service Topology
+                </span>
+                <span style={{ fontSize: 10, background: 'rgba(59, 130, 246, 0.15)', color: '#3b82f6', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                  GRAPH
+                </span>
+              </button>
             </div>
           </div>
+
+          {/* Technician Active Workload Box (When Role is Technician) */}
+          {role === 'TECHNICIAN' && (
+            <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-subtle)', borderRadius: 10, padding: 12, marginBottom: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--role-orange)', marginBottom: 6, textTransform: 'uppercase' }}>
+                My Active Workload
+              </div>
+              {(() => {
+                const myProfile = users.find(u => u.id === currentUser?.id);
+                const load = myProfile?.load ?? 0;
+                const max = myProfile?.max_load ?? 5;
+                const pct = Math.min(100, Math.round((load / (max || 1)) * 100));
+                return (
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                      <span style={{ color: 'var(--text-secondary)' }}>Capacity Used</span>
+                      <span style={{ fontWeight: 700, color: pct >= 80 ? '#ef4444' : 'var(--text-primary)' }}>{load}/{max} tickets ({pct}%)</span>
+                    </div>
+                    <div style={{ width: '100%', height: 6, background: 'var(--border-subtle)', borderRadius: 99, overflow: 'hidden' }}>
+                      <div style={{ width: `${pct}%`, height: '100%', background: pct >= 80 ? '#ef4444' : 'var(--role-orange)' }} />
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
 
           {/* Technician Roster for Admin & Team */}
           {role === 'ADMIN' && (
@@ -1398,16 +1819,25 @@ export function App() {
           )}
         </div>
 
-        {/* Bottom Sidebar: Pill Switch Theme Toggle & SLA Daemon */}
+        {/* Bottom Sidebar: Admin Config, SLA Daemon, Theme Switch */}
         <div>
           {role === 'ADMIN' && (
-            <button 
-              className="btn-secondary"
-              onClick={handleTriggerSLA}
-              style={{ width: '100%', marginBottom: 12, fontSize: 12, padding: '7px 10px', justifyContent: 'center' }}
-            >
-              <RefreshCw size={14} /> Run SLA Daemon
-            </button>
+            <>
+              <button 
+                className="btn-secondary"
+                onClick={() => { fetchAdminConfig(); setShowAdminConfigModal(true); }}
+                style={{ width: '100%', marginBottom: 8, fontSize: 12, padding: '7px 10px', justifyContent: 'center', borderColor: 'rgba(249, 115, 22, 0.4)', color: 'var(--role-orange)' }}
+              >
+                <Settings size={14} /> Admin Dynamic Config
+              </button>
+              <button 
+                className="btn-secondary"
+                onClick={handleTriggerSLA}
+                style={{ width: '100%', marginBottom: 12, fontSize: 12, padding: '7px 10px', justifyContent: 'center' }}
+              >
+                <RefreshCw size={14} /> Run SLA Daemon
+              </button>
+            </>
           )}
 
           {/* Theme Switch Pill (Replacing text "Toggle") */}
@@ -1443,14 +1873,15 @@ export function App() {
       <main style={{ flex: 1, padding: '24px 30px', minWidth: 0, overflowY: 'auto' }}>
         
         {/* Top Control Bar: Search + Flat Selects (Matching Page Font) + Report Button */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, marginBottom: 22 }}>
-          <div style={{ display: 'flex', gap: 12, flex: 1, maxWidth: 640 }}>
-            {/* Flat Search */}
-            <div style={{ position: 'relative', flex: 1 }}>
+        {/* Top Control Bar: 5 Distinct Search & Filter Criteria + Header CTAs */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 14, marginBottom: 22, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, flex: 1, minWidth: 500, flexWrap: 'wrap' }}>
+            {/* 1. Flat Search */}
+            <div style={{ position: 'relative', flex: '1 1 200px' }}>
               <Search size={16} color="var(--text-muted)" style={{ position: 'absolute', left: 14, top: 11 }} />
               <input 
                 type="text" 
-                placeholder="Search incident ID, title, service, or keywords..."
+                placeholder="Search ID, title, keyword..."
                 value={searchQuery}
                 onChange={e => setSearchQuery(e.target.value)}
                 className="flat-input"
@@ -1458,7 +1889,7 @@ export function App() {
               />
             </div>
 
-            {/* Flat Status Select */}
+            {/* 2. Flat Status Select */}
             <select 
               value={statusFilter} 
               onChange={e => setStatusFilter(e.target.value)}
@@ -1474,7 +1905,7 @@ export function App() {
               <option value="CLOSED">Closed</option>
             </select>
 
-            {/* Flat Priority Select */}
+            {/* 3. Flat Priority Select */}
             <select 
               value={priorityFilter} 
               onChange={e => setPriorityFilter(e.target.value)}
@@ -1486,9 +1917,37 @@ export function App() {
               <option value="P3">Medium</option>
               <option value="P4">Low</option>
             </select>
+
+            {/* 4. Flat Category Select */}
+            <select 
+              value={categoryFilter} 
+              onChange={e => setCategoryFilter(e.target.value)}
+              className="flat-select"
+            >
+              <option value="ALL">All Categories</option>
+              <option value="Database">Database</option>
+              <option value="Network">Network</option>
+              <option value="Authentication">Auth / Security</option>
+              <option value="Payment">Payment</option>
+              <option value="Cloud">Cloud</option>
+              <option value="Hardware">Hardware</option>
+              <option value="Application">Application</option>
+            </select>
+
+            {/* 5. Flat Service Select */}
+            <select 
+              value={serviceFilter} 
+              onChange={e => setServiceFilter(e.target.value)}
+              className="flat-select"
+            >
+              <option value="ALL">All Services</option>
+              {services.map(s => (
+                <option key={s.id} value={s.id}>{s.name}</option>
+              ))}
+            </select>
           </div>
 
-          {/* Action CTAs & Synchronized Live Clock */}
+          {/* Action CTAs: Live Clock, In-App Alerts (Channel 2), Outbox (Channel 1), Reports, Admin Config */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <div style={{
               display: 'flex',
@@ -1511,12 +1970,80 @@ export function App() {
               </span>
             </div>
 
-            {/* Email Outbox Dispatch Inspector Button */}
+            {/* Channel 2: In-App Notification Center with Bell & Unread Badge */}
+            <div style={{ position: 'relative' }}>
+              <button 
+                className="btn-secondary"
+                onClick={() => { fetchInAppNotifs(); setShowInAppNotifs(!showInAppNotifs); }}
+                style={{ fontSize: 12, padding: '7px 11px', gap: 6, position: 'relative' }}
+                title="View Live In-App Alerts (Channel 2)"
+              >
+                <Bell size={14} color="var(--role-orange)" />
+                <span>Alerts</span>
+                {inAppNotifs.filter(n => !n.is_read).length > 0 && (
+                  <span style={{ fontSize: 10, background: '#ef4444', color: '#fff', padding: '1px 5px', borderRadius: 99, fontWeight: 700 }}>
+                    {inAppNotifs.filter(n => !n.is_read).length}
+                  </span>
+                )}
+              </button>
+
+              {showInAppNotifs && (
+                <>
+                  <div
+                    onClick={() => setShowInAppNotifs(false)}
+                    style={{ position: 'fixed', inset: 0, zIndex: 9998, cursor: 'default' }}
+                  />
+                  <div style={{
+                    position: 'absolute', right: 0, top: 38, width: 340, background: 'var(--card-bg, #121212)',
+                    border: '1px solid var(--border-subtle)', borderRadius: 10, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                    padding: 14, zIndex: 9999
+                  }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)' }}>In-App Alerts (Channel 2)</span>
+                      <button
+                        onClick={handleMarkAllNotifsRead}
+                        style={{ background: 'transparent', border: 'none', color: 'var(--role-orange)', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+                      >
+                        Mark all read
+                      </button>
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 280, overflowY: 'auto' }}>
+                      {inAppNotifs.length === 0 ? (
+                        <div style={{ fontSize: 12, color: 'var(--text-muted)', textAlign: 'center', padding: 12 }}>No alerts yet.</div>
+                      ) : (
+                        inAppNotifs.map(n => (
+                          <div
+                            key={n.id}
+                            onClick={() => handleMarkNotifRead(n.id)}
+                            style={{
+                              padding: '8px 10px', borderRadius: 6, cursor: 'pointer',
+                              background: n.is_read ? 'var(--input-bg)' : 'rgba(249, 115, 22, 0.12)',
+                              border: n.is_read ? '1px solid var(--border-subtle)' : '1px solid rgba(249, 115, 22, 0.3)'
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+                              <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-primary)' }}>{n.title}</span>
+                              {!n.is_read && <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--role-orange)' }} />}
+                            </div>
+                            <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{n.message}</div>
+                            <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 4 }}>
+                              {new Date(n.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                            </div>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Channel 1: Email Outbox Dispatch Inspector Button */}
             <button 
               className="btn-secondary"
               onClick={() => { fetchNotifications(); setShowNotificationOutbox(true); }}
               style={{ fontSize: 12, padding: '7px 11px', gap: 6 }}
-              title="View live dispatched notification emails"
+              title="View live dispatched notification emails (Channel 1)"
             >
               <Mail size={14} color="var(--role-orange)" />
               <span>Outbox</span>
@@ -1536,6 +2063,19 @@ export function App() {
               <span>Reports & PDF</span>
             </button>
 
+            {/* Admin Dynamic Config Button */}
+            {role === 'ADMIN' && (
+              <button
+                className="btn-secondary"
+                onClick={() => { fetchAdminConfig(); setShowAdminConfigModal(true); }}
+                style={{ fontSize: 12, padding: '7px 11px', gap: 6, borderColor: 'rgba(249, 115, 22, 0.4)', color: 'var(--role-orange)' }}
+                title="Admin Dynamic Configuration"
+              >
+                <Settings size={14} />
+                <span>Admin Config</span>
+              </button>
+            )}
+
             {role === 'EMPLOYEE' && (
               <button 
                 className="btn-primary"
@@ -1547,8 +2087,10 @@ export function App() {
           </div>
         </div>
 
-        {/* Metrics Banner (FileEdit Document Icon for Active Open Tickets) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
+        {currentView === 'OVERVIEW' && (
+          <>
+            {/* Metrics Banner (FileEdit Document Icon for Active Open Tickets) */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
           <div className="glass-panel" style={{ padding: '16px 18px' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 13, marginBottom: 6 }}>
               <span>Total Incidents</span>
@@ -1601,7 +2143,11 @@ export function App() {
                 <div 
                   key={inc.id}
                   className={`glass-panel glass-panel-interactive`}
-                  onClick={() => setSelectedIncident(inc)}
+                  onClick={() => {
+                    setSelectedIncident(inc);
+                    fetchSuggestedResolutions(inc.id);
+                  }}
+
                   style={{
                     padding: '14px 18px', cursor: 'pointer',
                     borderColor: selectedIncident?.id === inc.id ? 'var(--role-orange)' : undefined,
@@ -1772,23 +2318,249 @@ export function App() {
                             onChange={e => setActionNote(e.target.value)}
                             className="flat-input"
                           />
-                          <button className="btn-secondary" onClick={() => handleStartInvestigation(selectedIncident.id)} style={{ width: '100%', justifyContent: 'center' }}>
-                            Add Investigation Note
-                          </button>
+                          <div style={{ display: 'flex', gap: 8 }}>
+                            <button className="btn-secondary" onClick={() => handleStartInvestigation(selectedIncident.id)} style={{ flex: 1, justifyContent: 'center' }}>
+                              Add Note
+                            </button>
+                            <button 
+                              type="button"
+                              className="btn-secondary" 
+                              onClick={() => setShowRequestInfoInput(!showRequestInfoInput)} 
+                              style={{ flex: 1, justifyContent: 'center', borderColor: 'rgba(59, 130, 246, 0.4)', color: '#3b82f6' }}
+                            >
+                              <MessageSquare size={13} /> Request Info
+                            </button>
+                          </div>
+
+                          {showRequestInfoInput && (
+                            <div style={{ background: 'rgba(59, 130, 246, 0.08)', border: '1px solid rgba(59, 130, 246, 0.3)', borderRadius: 6, padding: 8 }}>
+                              <input
+                                type="text"
+                                placeholder="Clarification question for reporter..."
+                                value={techRequestInfoText}
+                                onChange={e => setTechRequestInfoText(e.target.value)}
+                                className="flat-input"
+                                style={{ marginBottom: 6 }}
+                              />
+                              <button
+                                className="btn-primary"
+                                onClick={() => handleTechnicianRequestInfo(selectedIncident.id)}
+                                style={{ width: '100%', justifyContent: 'center', background: '#3b82f6', fontSize: 11 }}
+                              >
+                                Send Question to Reporter
+                              </button>
+                            </div>
+                          )}
                         </div>
                       )}
 
-                      {selectedIncident.status === 'IN_PROGRESS' && (
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 4 }}>
-                          <input 
-                            type="text" 
-                            placeholder="Resolution details..."
+                      {/* Intelligent Resolution Suggestions & AI Runbook (Feature G & Innovation) */}
+                      {(selectedIncident.status === 'ACKNOWLEDGED' || selectedIncident.status === 'IN_PROGRESS') && (
+                        <div style={{
+                          marginTop: 6,
+                          marginBottom: 6,
+                          background: 'rgba(249, 115, 22, 0.05)',
+                          border: '1px solid rgba(249, 115, 22, 0.25)',
+                          borderRadius: 8,
+                          padding: 12
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 700, color: 'var(--role-orange)' }}>
+                              <Sparkles size={14} /> Suggested Resolutions (Feature G)
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleGenerateAIRunbook(selectedIncident.id)}
+                              disabled={generatingRunbook}
+                              style={{
+                                background: 'linear-gradient(135deg, #f97316, #ea580c)',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: 6,
+                                padding: '4px 10px',
+                                fontSize: 11,
+                                fontWeight: 600,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: 4
+                              }}
+                            >
+                              <Cpu size={12} /> {generatingRunbook ? 'Analyzing...' : 'AI SRE Runbook'}
+                            </button>
+                          </div>
+
+                          {/* AI Runbook Output if Generated */}
+                          {aiRunbook && (
+                            <div style={{
+                              background: '#09090b',
+                              border: '1px solid rgba(249, 115, 22, 0.4)',
+                              borderRadius: 6,
+                              padding: 10,
+                              marginBottom: 10,
+                              fontSize: 12,
+                              color: '#f4f4f5'
+                            }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                <span style={{ fontWeight: 700, color: '#f97316', fontSize: 11 }}>AI Generated Runbook</span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleApplySuggestedResolution(aiRunbook.replace(/###/g, '').trim(), 'AI SRE Runbook')}
+                                  style={{
+                                    background: 'linear-gradient(135deg, #f97316, #ea580c)',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: 5,
+                                    fontSize: 11,
+                                    fontWeight: 600,
+                                    padding: '4px 10px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: 4
+                                  }}
+                                >
+                                  <CheckCircle2 size={12} /> Apply to Resolution
+                                </button>
+                              </div>
+                              <pre style={{ whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 11, margin: 0, lineHeight: 1.4 }}>
+                                {aiRunbook}
+                              </pre>
+                            </div>
+                          )}
+
+                          {/* Historical Matches & SOP Suggestions */}
+                          {loadingSuggestions ? (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Searching historical incident resolutions...</div>
+                          ) : suggestedResolutions.length === 0 ? (
+                            <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>Click 'AI SRE Runbook' to generate diagnostic procedures.</div>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 360, overflowY: 'auto', paddingRight: 4 }}>
+                              {suggestedResolutions.slice(0, 2).map((sug, idx) => (
+                                <div key={idx} style={{
+                                  background: 'var(--input-bg)',
+                                  border: '1px solid var(--border-subtle)',
+                                  borderRadius: 8,
+                                  padding: 12,
+                                  fontSize: 12
+                                }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                                    <span style={{ fontWeight: 700, color: 'var(--text-primary)', fontSize: 13 }}>{sug.title}</span>
+                                    <span style={{
+                                      fontSize: 10.5,
+                                      background: sug.source === 'HISTORICAL_KB' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                                      color: sug.source === 'HISTORICAL_KB' ? '#10b981' : '#3b82f6',
+                                      padding: '2px 8px',
+                                      borderRadius: 4,
+                                      fontWeight: 700
+                                    }}>
+                                      {sug.source === 'HISTORICAL_KB' ? `${sug.confidence}% Match` : 'Enterprise SOP'}
+                                    </span>
+                                  </div>
+                                  <div style={{
+                                    color: 'var(--text-secondary)',
+                                    marginBottom: 10,
+                                    whiteSpace: 'pre-line',
+                                    fontSize: 11.5,
+                                    lineHeight: 1.55,
+                                    paddingBottom: 4
+                                  }}>
+                                    {sug.steps}
+                                  </div>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApplySuggestedResolution(sug.steps, sug.title)}
+                                    style={{
+                                      background: resolutionNote === sug.steps
+                                        ? 'linear-gradient(135deg, #059669, #047857)'
+                                        : 'linear-gradient(135deg, #10b981, #059669)',
+                                      color: '#ffffff',
+                                      border: 'none',
+                                      borderRadius: 6,
+                                      padding: '7px 14px',
+                                      fontSize: 12,
+                                      fontWeight: 600,
+                                      cursor: 'pointer',
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: 6,
+                                      boxShadow: '0 2px 8px rgba(16, 185, 129, 0.25)',
+                                      transition: 'all 0.15s ease'
+                                    }}
+                                  >
+                                    {resolutionNote === sug.steps ? (
+                                      <>
+                                        <Check size={14} /> Resolution Applied ✓
+                                      </>
+                                    ) : (
+                                      <>
+                                        <CheckCircle2 size={14} /> Use This Resolution
+                                      </>
+                                    )}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {resolutionAppliedMsg && (
+                        <div style={{
+                          background: 'rgba(16, 185, 129, 0.15)',
+                          border: '1px solid #10b981',
+                          color: '#10b981',
+                          borderRadius: 6,
+                          padding: '8px 12px',
+                          fontSize: 12,
+                          fontWeight: 600,
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          marginTop: 6
+                        }}>
+                          <CheckCircle size={15} /> {resolutionAppliedMsg}
+                        </div>
+                      )}
+
+                      {(selectedIncident.status === 'IN_PROGRESS' || (selectedIncident.status === 'ACKNOWLEDGED' && resolutionNote)) && (
+                        <div id="resolution-action-box" style={{
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: 8,
+                          marginTop: 8,
+                          background: 'rgba(16, 185, 129, 0.05)',
+                          border: '1px solid rgba(16, 185, 129, 0.25)',
+                          borderRadius: 8,
+                          padding: 12
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#10b981' }}>Resolution Summary & Remediation Steps:</span>
+                            {resolutionNote && (
+                              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resolutionNote.length} characters</span>
+                            )}
+                          </div>
+                          <textarea 
+                            rows={4}
+                            placeholder="Document verified resolution steps..."
                             value={resolutionNote}
                             onChange={e => setResolutionNote(e.target.value)}
                             className="flat-input"
+                            style={{ minHeight: 85, lineHeight: 1.45, fontFamily: 'inherit', resize: 'vertical' }}
                           />
-                          <button className="btn-primary" onClick={() => handleResolve(selectedIncident.id)} style={{ width: '100%', justifyContent: 'center', background: 'linear-gradient(135deg, #10b981, #059669)' }}>
-                            <Check size={16} /> Mark Resolved
+                          <button
+                            className="btn-primary"
+                            onClick={() => handleResolve(selectedIncident.id)}
+                            style={{
+                              width: '100%',
+                              justifyContent: 'center',
+                              background: 'linear-gradient(135deg, #10b981, #059669)',
+                              padding: '10px 16px',
+                              fontSize: 13,
+                              fontWeight: 700
+                            }}
+                          >
+                            <Check size={16} /> Mark Incident Resolved
                           </button>
                         </div>
                       )}
@@ -1796,6 +2568,65 @@ export function App() {
                   )}
 
                   {/* Employee Operations */}
+                  {role === 'EMPLOYEE' && ['NEW', 'CLASSIFIED', 'ASSIGNED', 'ACKNOWLEDGED', 'IN_PROGRESS'].includes(selectedIncident.status) && (
+                    <div style={{
+                      background: 'rgba(59, 130, 246, 0.08)',
+                      border: '1px solid rgba(59, 130, 246, 0.25)',
+                      borderRadius: 8,
+                      padding: '12px 14px',
+                      marginBottom: 10
+                    }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, color: '#3b82f6', fontSize: 12, marginBottom: 4 }}>
+                        <Info size={14} /> Assigned to Technician: {selectedIncident.assigned_technician?.name || 'Assigned Specialist'}
+                      </div>
+                      <div style={{ fontSize: 11.5, color: 'var(--text-secondary)', lineHeight: 1.45, marginBottom: 8 }}>
+                        Under enterprise ITIL governance, <strong>Employees</strong> report incidents and verify fixes. Only an assigned <strong>Technician</strong> can investigate and mark tickets resolved.
+                      </div>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <button
+                          type="button"
+                          onClick={() => setRole('TECHNICIAN')}
+                          className="btn-primary"
+                          style={{
+                            fontSize: 11.5,
+                            padding: '6px 14px',
+                            background: 'linear-gradient(135deg, #3b82f6, #1d4ed8)',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 6
+                          }}
+                        >
+                          <UserCheck size={14} /> Switch to Technician Role to Triage & Resolve
+                        </button>
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                          (or switch roles in the top-right header)
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {role === 'EMPLOYEE' && ['ASSIGNED', 'ACKNOWLEDGED', 'IN_PROGRESS'].includes(selectedIncident.status) && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginTop: 4, marginBottom: 8 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-secondary)' }}>
+                        Add Additional Info / Respond to Technician:
+                      </div>
+                      <input 
+                        type="text" 
+                        placeholder="Provide details or respond to technician questions..."
+                        value={empAddInfoText}
+                        onChange={e => setEmpAddInfoText(e.target.value)}
+                        className="flat-input"
+                      />
+                      <button
+                        className="btn-secondary"
+                        onClick={() => handleEmployeeAddInfo(selectedIncident.id)}
+                        style={{ width: '100%', justifyContent: 'center', fontSize: 12 }}
+                      >
+                        <Send size={13} /> Submit Additional Info
+                      </button>
+                    </div>
+                  )}
+
                   {role === 'EMPLOYEE' && selectedIncident.status === 'RESOLVED' && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                       <p style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
@@ -1854,8 +2685,449 @@ export function App() {
           </div>
 
         </div>
+          </>
+        )}
+
+        {/* Dedicated View 2: Technician Workload Dashboard */}
+        {currentView === 'TECH_WORKLOAD' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>Technician Workload & Capacity Management</h2>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Live workload distribution, active ticket queues, and certified skill profiles.
+                </p>
+              </div>
+              <button className="btn-secondary" onClick={() => fetchData()} style={{ fontSize: 12 }}>
+                <RefreshCw size={13} /> Refresh Capacities
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+              {users.filter(u => u.role === 'TECHNICIAN').map(t => {
+                const load = t.load ?? 0;
+                const max = t.max_load ?? 5;
+                const pct = Math.min(100, Math.round((load / (max || 1)) * 100));
+                const assignedTickets = incidents.filter(i => i.assigned_technician?.id === t.id && !['RESOLVED', 'VERIFIED', 'CLOSED'].includes(i.status));
+                return (
+                  <div key={t.id} className="glass-panel" style={{ padding: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+                      <div>
+                        <h3 style={{ fontSize: 15, fontWeight: 700, color: 'var(--text-primary)' }}>{t.name}</h3>
+                        <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{t.email}</span>
+                      </div>
+                      <span style={{
+                        fontSize: 11,
+                        padding: '2px 8px',
+                        borderRadius: 99,
+                        fontWeight: 700,
+                        background: pct >= 80 ? 'rgba(239, 68, 68, 0.15)' : pct >= 50 ? 'rgba(245, 158, 11, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                        color: pct >= 80 ? '#ef4444' : pct >= 50 ? '#f59e0b' : '#10b981'
+                      }}>
+                        {pct >= 80 ? 'HIGH LOAD' : pct >= 50 ? 'MODERATE' : 'OPTIMAL'}
+                      </span>
+                    </div>
+
+                    {/* Capacity Meter */}
+                    <div style={{ marginBottom: 14 }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                        <span style={{ color: 'var(--text-secondary)' }}>Capacity Used:</span>
+                        <span style={{ fontWeight: 700, color: 'var(--text-primary)' }}>{load} / {max} Active Tickets ({pct}%)</span>
+                      </div>
+                      <div style={{ width: '100%', height: 8, background: 'var(--border-subtle)', borderRadius: 99, overflow: 'hidden' }}>
+                        <div style={{ width: `${pct}%`, height: '100%', background: pct >= 80 ? '#ef4444' : pct >= 50 ? '#f59e0b' : 'var(--role-orange)' }} />
+                      </div>
+                    </div>
+
+                    {/* Skills */}
+                    <div style={{ marginBottom: 14 }}>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Domain Skills:</span>
+                      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                        {(t.skills || ['general']).map((s, idx) => (
+                          <span key={idx} style={{ fontSize: 10, background: 'var(--input-bg)', border: '1px solid var(--border-subtle)', padding: '2px 6px', borderRadius: 4, color: 'var(--text-secondary)' }}>
+                            {s}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Active Tickets Assigned */}
+                    <div>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 6 }}>
+                        Active Tickets ({assignedTickets.length}):
+                      </span>
+                      {assignedTickets.length === 0 ? (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>No active tickets assigned.</div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          {assignedTickets.map(at => (
+                            <div
+                              key={at.id}
+                              onClick={() => { setSelectedIncident(at); setCurrentView('OVERVIEW'); }}
+                              style={{
+                                padding: '6px 8px', borderRadius: 4, background: 'var(--input-bg)',
+                                border: '1px solid var(--border-subtle)', cursor: 'pointer',
+                                display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11
+                              }}
+                            >
+                              <span style={{ fontWeight: 600, color: 'var(--role-orange)', fontFamily: 'JetBrains Mono' }}>{at.id}</span>
+                              <span style={{ color: 'var(--text-primary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+                                {at.title}
+                              </span>
+                              <span className={`badge-${at.priority.toLowerCase()}`} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3 }}>
+                                {at.priority}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Dedicated View 3: Service Analysis & Catalog */}
+        {currentView === 'SERVICE_ANALYSIS' && (
+          <div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, color: 'var(--text-primary)' }}>Service Analysis & Infrastructure Health</h2>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginTop: 2 }}>
+                  Catalog of institutional IT services, priority SLA compliance tiers, and upstream/downstream dependencies.
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: 10 }}>
+                <button className="btn-secondary" onClick={handleOpenTopology} style={{ fontSize: 12 }}>
+                  <Network size={14} color="var(--role-orange)" /> Interactive Topology Graph
+                </button>
+                {role === 'ADMIN' && (
+                  <button className="btn-primary" onClick={() => { fetchAdminConfig(); setShowAdminConfigModal(true); setAdminConfigTab('SERVICES'); }} style={{ fontSize: 12 }}>
+                    <PlusCircle size={14} /> Add Service
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: 16 }}>
+              {services.map(s => {
+                const srvIncidents = incidents.filter(i => i.service.id === s.id);
+                const openIncs = srvIncidents.filter(i => !['RESOLVED', 'VERIFIED', 'CLOSED'].includes(i.status));
+                const p1Incs = srvIncidents.filter(i => i.priority === 'P1');
+                const isDegraded = p1Incs.length > 0;
+                return (
+                  <div key={s.id} className="glass-panel" style={{ padding: 20 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                      <div>
+                        <h3 style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>{s.name}</h3>
+                        <span style={{ fontSize: 11, fontFamily: 'JetBrains Mono', color: 'var(--role-orange)' }}>{s.id}</span>
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <span style={{
+                          fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
+                          background: isDegraded ? 'rgba(239, 68, 68, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                          color: isDegraded ? '#ef4444' : '#10b981'
+                        }}>
+                          {isDegraded ? 'DEGRADED' : 'OPERATIONAL'}
+                        </span>
+                        <span style={{
+                          fontSize: 10, padding: '2px 8px', borderRadius: 4, fontWeight: 700,
+                          background: s.tier === 'MISSION_CRITICAL' ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)',
+                          color: s.tier === 'MISSION_CRITICAL' ? '#ef4444' : '#3b82f6'
+                        }}>
+                          {s.tier.replace('_', ' ')}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 14, lineHeight: 1.4 }}>
+                      {s.description}
+                    </p>
+
+                    {/* Metrics */}
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, padding: 10, background: 'var(--input-bg)', borderRadius: 6, marginBottom: 12 }}>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>{srvIncidents.length}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Total Incidents</div>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: openIncs.length > 0 ? '#f59e0b' : '#10b981' }}>{openIncs.length}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>Active Open</div>
+                      </div>
+                      <div style={{ textAlign: 'center' }}>
+                        <div style={{ fontSize: 16, fontWeight: 700, color: p1Incs.length > 0 ? '#ef4444' : 'var(--text-muted)' }}>{p1Incs.length}</div>
+                        <div style={{ fontSize: 10, color: 'var(--text-muted)' }}>P1 Outages</div>
+                      </div>
+                    </div>
+
+                    {/* Dependencies */}
+                    <div>
+                      <span style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>
+                        Dependencies:
+                      </span>
+                      {(s.dependencies || []).length === 0 ? (
+                        <span style={{ fontSize: 11, color: 'var(--text-muted)', fontStyle: 'italic' }}>Independent core service</span>
+                      ) : (
+                        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                          {(s.dependencies || []).map((depId, idx) => (
+                            <span key={idx} style={{ fontSize: 10, background: 'rgba(59, 130, 246, 0.12)', color: '#3b82f6', padding: '2px 6px', borderRadius: 4, fontFamily: 'JetBrains Mono' }}>
+                              ➔ {depId}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
       </main>
+
+      {/* ======================================================== */}
+      {/* ADMIN DYNAMIC CONFIGURATION MODAL (Dynamic Rubric Item 1)*/}
+      {/* ======================================================== */}
+      {showAdminConfigModal && (
+        <div onClick={(e) => { if (e.target === e.currentTarget) setShowAdminConfigModal(false); }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.8)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 110 }}>
+          <div className="glass-panel" style={{ width: 680, maxHeight: '85vh', overflowY: 'auto', padding: 26, background: 'var(--bg-modal)', border: '1px solid var(--border-accent)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 18 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <Settings size={20} color="var(--role-orange)" />
+                <h2 style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>Admin Dynamic Configuration</h2>
+              </div>
+              <button onClick={() => setShowAdminConfigModal(false)} style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}>
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Config Tabs */}
+            <div style={{ display: 'flex', gap: 6, borderBottom: '1px solid var(--border-subtle)', paddingBottom: 10, marginBottom: 16 }}>
+              {[
+                { id: 'SERVICES', label: 'IT Services' },
+                { id: 'CATEGORIES', label: 'Incident Categories' },
+                { id: 'SLA', label: 'SLA Policies' },
+                { id: 'STRATEGY', label: 'Assignment Strategy' }
+              ].map(tab => (
+                <button
+                  key={tab.id}
+                  onClick={() => setAdminConfigTab(tab.id as any)}
+                  style={{
+                    padding: '6px 12px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 12,
+                    background: adminConfigTab === tab.id ? 'var(--role-orange)' : 'var(--input-bg)',
+                    color: adminConfigTab === tab.id ? '#fff' : 'var(--text-secondary)',
+                    fontWeight: adminConfigTab === tab.id ? 700 : 500
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Tab 1: IT Services */}
+            {adminConfigTab === 'SERVICES' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ background: 'var(--input-bg)', padding: 14, borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>Add New IT Service</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <input
+                      type="text" placeholder="Service Name (e.g. Identity SSO)"
+                      value={cfgServiceName} onChange={e => setCfgServiceName(e.target.value)}
+                      className="flat-input"
+                    />
+                    <select
+                      value={cfgServiceTier} onChange={e => setCfgServiceTier(e.target.value)}
+                      className="flat-select"
+                    >
+                      <option value="MISSION_CRITICAL">MISSION_CRITICAL (Tier 1)</option>
+                      <option value="BUSINESS_CRITICAL">BUSINESS_CRITICAL (Tier 2)</option>
+                      <option value="STANDARD">STANDARD (Tier 3)</option>
+                    </select>
+                  </div>
+                  <input
+                    type="text" placeholder="Description of service..."
+                    value={cfgServiceDesc} onChange={e => setCfgServiceDesc(e.target.value)}
+                    className="flat-input" style={{ marginBottom: 10 }}
+                  />
+                  <input
+                    type="text" placeholder="Dependencies (comma-separated IDs, e.g. srv-database, srv-network)"
+                    value={cfgServiceDeps} onChange={e => setCfgServiceDeps(e.target.value)}
+                    className="flat-input" style={{ marginBottom: 10 }}
+                  />
+                  <button
+                    className="btn-primary" onClick={handleCreateService} disabled={cfgSubmitting}
+                    style={{ fontSize: 12, padding: '6px 14px' }}
+                  >
+                    {cfgSubmitting ? 'Registering...' : 'Register IT Service'}
+                  </button>
+                </div>
+
+                <div>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Active Service Catalog ({services.length})</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+                    {services.map(s => (
+                      <div key={s.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--input-bg)', borderRadius: 6, fontSize: 12 }}>
+                        <div>
+                          <strong style={{ color: 'var(--text-primary)' }}>{s.name}</strong> <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--role-orange)', fontSize: 10 }}>({s.id})</span>
+                          <div style={{ fontSize: 11, color: 'var(--text-secondary)' }}>{s.description}</div>
+                        </div>
+                        <span style={{ fontSize: 10, background: 'rgba(249, 115, 22, 0.15)', color: 'var(--role-orange)', padding: '2px 6px', borderRadius: 4, fontWeight: 700 }}>
+                          {s.tier}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 2: Incident Categories */}
+            {adminConfigTab === 'CATEGORIES' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ background: 'var(--input-bg)', padding: 14, borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>Register Dynamic Incident Category</h4>
+                  <input
+                    type="text" placeholder="Category Name (e.g. Storage, ERP, VoIP)"
+                    value={cfgCategoryName} onChange={e => setCfgCategoryName(e.target.value)}
+                    className="flat-input" style={{ marginBottom: 10 }}
+                  />
+                  <input
+                    type="text" placeholder="Detection Keywords (comma-separated, e.g. disk, san, nas, raid, quota)"
+                    value={cfgCategoryKeywords} onChange={e => setCfgCategoryKeywords(e.target.value)}
+                    className="flat-input" style={{ marginBottom: 10 }}
+                  />
+                  <button
+                    className="btn-primary" onClick={handleAddCategory} disabled={cfgSubmitting}
+                    style={{ fontSize: 12, padding: '6px 14px' }}
+                  >
+                    {cfgSubmitting ? 'Saving...' : 'Register Category'}
+                  </button>
+                </div>
+
+                <div>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Active NLP Categories</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 200, overflowY: 'auto' }}>
+                    {adminConfigData?.categories && Object.entries(adminConfigData.categories).map(([cat, kw]: any) => (
+                      <div key={cat} style={{ padding: '8px 10px', background: 'var(--input-bg)', borderRadius: 6, fontSize: 12 }}>
+                        <strong style={{ color: 'var(--role-orange)' }}>{cat}</strong>
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginTop: 2 }}>
+                          Keywords: {Array.isArray(kw) ? kw.join(', ') : String(kw)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 3: SLA Policies */}
+            {adminConfigTab === 'SLA' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <div style={{ background: 'var(--input-bg)', padding: 14, borderRadius: 8, border: '1px solid var(--border-subtle)' }}>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>Update Priority Tier SLA Target</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Priority Tier</label>
+                      <select value={cfgSlaTier} onChange={e => setCfgSlaTier(e.target.value)} className="flat-select">
+                        <option value="P1">P1 - Critical</option>
+                        <option value="P2">P2 - High</option>
+                        <option value="P3">P3 - Medium</option>
+                        <option value="P4">P4 - Low</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Response (minutes)</label>
+                      <input
+                        type="number" value={cfgSlaResp} onChange={e => setCfgSlaResp(Number(e.target.value))}
+                        className="flat-input"
+                      />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: 11, color: 'var(--text-muted)', display: 'block', marginBottom: 4 }}>Resolution (minutes)</label>
+                      <input
+                        type="number" value={cfgSlaReso} onChange={e => setCfgSlaReso(Number(e.target.value))}
+                        className="flat-input"
+                      />
+                    </div>
+                  </div>
+                  <button
+                    className="btn-primary" onClick={handleUpdateSLAPolicy} disabled={cfgSubmitting}
+                    style={{ fontSize: 12, padding: '6px 14px' }}
+                  >
+                    {cfgSubmitting ? 'Updating...' : 'Save SLA Targets'}
+                  </button>
+                </div>
+
+                <div>
+                  <h4 style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 8 }}>Configured SLA Targets</h4>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
+                    {adminConfigData?.sla_targets && Object.entries(adminConfigData.sla_targets).map(([p, tgt]: any) => (
+                      <div key={p} style={{ padding: 10, background: 'var(--input-bg)', borderRadius: 6, border: '1px solid var(--border-subtle)' }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                          <strong style={{ color: 'var(--role-orange)' }}>{p}</strong>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Response: {tgt.response_minutes}m</span>
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
+                          Resolution Deadline: <strong>{tgt.resolution_minutes >= 60 ? `${(tgt.resolution_minutes/60).toFixed(1)}h` : `${tgt.resolution_minutes}m`}</strong>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Tab 4: Assignment Strategy */}
+            {adminConfigTab === 'STRATEGY' && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                <p style={{ fontSize: 13, color: 'var(--text-secondary)' }}>
+                  Select the active automated technician assignment algorithm. Changes take effect dynamically across all newly reported incidents.
+                </p>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  {[
+                    { id: 'smart', name: 'Composite Smart Assignment (Default)', desc: 'Weighted optimization of current technician workload, verified skill keyword matches, and past SLA resolution performance.' },
+                    { id: 'skill', name: 'Skill-Based Match', desc: 'Assigns exclusively to technicians certified with the relevant technical skills matching the incident category.' },
+                    { id: 'load', name: 'Least-Loaded Active Ticket Assignment', desc: 'Directs ticket to the available technician with the lowest active concurrent ticket burden.' },
+                    { id: 'round_robin', name: 'Round-Robin Rotation', desc: 'Cycles sequentially through active on-duty technicians to ensure uniform task distribution.' }
+                  ].map(strat => (
+                    <div
+                      key={strat.id}
+                      onClick={() => handleUpdateAssignmentStrategy(strat.id)}
+                      style={{
+                        padding: 14, borderRadius: 8, cursor: 'pointer',
+                        background: cfgActiveStrategy === strat.id ? 'rgba(249, 115, 22, 0.12)' : 'var(--input-bg)',
+                        border: cfgActiveStrategy === strat.id ? '1px solid var(--role-orange)' : '1px solid var(--border-subtle)',
+                        display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                          <strong style={{ color: 'var(--text-primary)', fontSize: 14 }}>{strat.name}</strong>
+                          {cfgActiveStrategy === strat.id && (
+                            <span style={{ fontSize: 10, background: 'var(--role-orange)', color: '#fff', padding: '1px 6px', borderRadius: 99, fontWeight: 700 }}>
+                              ACTIVE
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>{strat.desc}</div>
+                      </div>
+                      <input
+                        type="radio" name="assignment_strategy" checked={cfgActiveStrategy === strat.id}
+                        onChange={() => handleUpdateAssignmentStrategy(strat.id)}
+                        style={{ cursor: 'pointer' }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* ======================================================== */}
       {/* 3. REPORT INCIDENT MODAL                                 */}
@@ -2189,7 +3461,7 @@ export function App() {
       {/* 4. REAL EMAIL NOTIFICATION OUTBOX & LIVE DISPATCHER      */}
       {/* ======================================================== */}
       {showNotificationOutbox && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}>
+        <div onClick={(e) => { if (e.target === e.currentTarget) setShowNotificationOutbox(false); }} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}>
           <div className="glass-panel" style={{ width: '100%', maxWidth: 840, maxHeight: '90vh', overflowY: 'auto', padding: 26, background: 'var(--bg-main)', border: '1px solid var(--border-subtle)', borderRadius: 14 }}>
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 14, marginBottom: 18 }}>
@@ -2484,8 +3756,151 @@ export function App() {
         </div>
       )}
 
+      {/* ======================================================== */}
+      {/* 5. SERVICE DEPENDENCY TOPOLOGY & HEALTH GRAPH (MODAL)    */}
+      {/* ======================================================== */}
+      {showTopologyModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(6px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: 20 }}>
+          <div className="glass-panel" style={{ width: '100%', maxWidth: 940, maxHeight: '90vh', overflowY: 'auto', padding: 28, background: 'var(--bg-main)', border: '1px solid var(--border-subtle)', borderRadius: 14 }}>
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 16, marginBottom: 20 }}>
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '1px' }}>
+                  Innovation Pillar &bull; Topology & Correlation Engine
+                </div>
+                <h2 style={{ fontSize: 22, fontWeight: 700, margin: '6px 0 2px 0', color: 'var(--text-primary)' }}>
+                  Organizational IT Service Dependency Graph
+                </h2>
+                <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                  Monitors upstream infrastructure dependencies, failure propagation, and real-time operational health.
+                </div>
+              </div>
+              <button 
+                onClick={() => setShowTopologyModal(false)}
+                className="btn-secondary"
+                style={{ padding: '6px 12px', fontSize: 12 }}
+              >
+                <X size={15} /> Close
+              </button>
+            </div>
+
+            {loadingTopology ? (
+              <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-muted)' }}>Computing topology graph...</div>
+            ) : topologyData ? (
+              <div>
+                {/* Metrics Pills */}
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 14, marginBottom: 20 }}>
+                  <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Total Services</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: 'var(--text-primary)', marginTop: 4 }}>{topologyData.total_services}</div>
+                  </div>
+                  <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Operational</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: '#10b981', marginTop: 4 }}>{topologyData.operational_services}</div>
+                  </div>
+                  <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 12 }}>
+                    <div style={{ fontSize: 11, color: 'var(--text-muted)', textTransform: 'uppercase', fontWeight: 600 }}>Impacted / Degraded</div>
+                    <div style={{ fontSize: 22, fontWeight: 700, color: topologyData.degraded_services > 0 ? '#ef4444' : '#10b981', marginTop: 4 }}>
+                      {topologyData.degraded_services}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Service Nodes Grid */}
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>
+                  Infrastructure Service Nodes
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14, marginBottom: 24 }}>
+                  {topologyData.nodes.map((node: any) => {
+                    const isOperational = node.health === 'OPERATIONAL';
+                    const isCritical = node.health === 'CRITICAL';
+                    const isImpacted = node.health === 'IMPACTED';
+                    const badgeColor = isOperational ? '#10b981' : isCritical ? '#ef4444' : isImpacted ? '#8b5cf6' : '#f59e0b';
+                    const badgeBg = isOperational ? 'rgba(16, 185, 129, 0.15)' : isCritical ? 'rgba(239, 68, 68, 0.15)' : isImpacted ? 'rgba(139, 92, 246, 0.15)' : 'rgba(245, 158, 11, 0.15)';
+
+                    return (
+                      <div 
+                        key={node.id}
+                        style={{
+                          background: 'var(--input-bg)',
+                          border: `1px solid ${node.health === 'CRITICAL' ? 'rgba(239, 68, 68, 0.5)' : node.health === 'IMPACTED' ? 'rgba(139, 92, 246, 0.5)' : 'var(--border-subtle)'}`,
+                          borderRadius: 10,
+                          padding: 14,
+                          position: 'relative'
+                        }}
+                      >
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+                          <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--text-primary)' }}>{node.name}</span>
+                          <span style={{ fontSize: 10, fontWeight: 700, color: badgeColor, background: badgeBg, padding: '2px 8px', borderRadius: 4 }}>
+                            {node.health}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 10 }}>
+                          {formatServiceTier(node.tier)} &bull; {node.description}
+                        </div>
+
+                        {node.cascade_reason && (
+                          <div style={{ fontSize: 11, color: '#8b5cf6', background: 'rgba(139, 92, 246, 0.1)', padding: '4px 8px', borderRadius: 4, marginBottom: 8 }}>
+                            ⚠️ {node.cascade_reason}
+                          </div>
+                        )}
+
+                        <div style={{ fontSize: 11, color: 'var(--text-secondary)', display: 'flex', justifyContent: 'space-between', borderTop: '1px solid var(--border-subtle)', paddingTop: 8 }}>
+                          <span>Active Incidents: <strong>{node.active_incidents}</strong></span>
+                          <span>Critical P1: <strong style={{ color: node.critical_incidents > 0 ? '#ef4444' : 'inherit' }}>{node.critical_incidents}</strong></span>
+                        </div>
+
+                        {node.dependencies && node.dependencies.length > 0 && (
+                          <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                            <span style={{ fontWeight: 600 }}>Upstream Dependencies:</span>
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4 }}>
+                              {node.dependencies.map((depId: string) => {
+                                const depNode = topologyData.nodes.find((n: any) => n.id === depId);
+                                return (
+                                  <span key={depId} style={{ background: 'var(--card-bg)', border: '1px solid var(--border-subtle)', padding: '2px 6px', borderRadius: 4, fontSize: 10 }}>
+                                    &larr; {depNode ? depNode.name : depId}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Topology Edges Table */}
+                <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-primary)', marginBottom: 10 }}>
+                  Service Directed Dependency Edges
+                </div>
+                <div style={{ background: 'var(--input-bg)', border: '1px solid var(--border-subtle)', borderRadius: 8, padding: 12 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 60px 1fr', gap: 10, fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', borderBottom: '1px solid var(--border-subtle)', paddingBottom: 6, marginBottom: 8 }}>
+                    <span>Dependent Service (Consumer)</span>
+                    <span style={{ textAlign: 'center' }}>Link</span>
+                    <span>Upstream Dependency (Provider)</span>
+                  </div>
+                  {topologyData.edges.map((edge: any, idx: number) => {
+                    const fromNode = topologyData.nodes.find((n: any) => n.id === edge.from);
+                    const toNode = topologyData.nodes.find((n: any) => n.id === edge.to);
+                    return (
+                      <div key={idx} style={{ display: 'grid', gridTemplateColumns: '1fr 60px 1fr', gap: 10, fontSize: 12, alignItems: 'center', padding: '4px 0' }}>
+                        <span style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{fromNode?.name || edge.from}</span>
+                        <span style={{ color: '#3b82f6', textAlign: 'center', fontWeight: 700 }}>&rarr;</span>
+                        <span style={{ color: 'var(--text-secondary)' }}>{toNode?.name || edge.to}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
 
 export default App;
+

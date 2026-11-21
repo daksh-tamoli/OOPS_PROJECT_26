@@ -1,7 +1,12 @@
+import os
 import asyncio
 import secrets
 import uuid
 from datetime import datetime, timezone, timedelta
+from dotenv import load_dotenv
+
+load_dotenv()
+
 from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -11,7 +16,19 @@ from backend.app.domain.models.enums import UserRole, IncidentStatus, Priority, 
 from backend.app.domain.models.user import Employee, Technician, Administrator, User
 from backend.app.domain.models.service import ITService
 from backend.app.domain.exceptions import (
-    DomainException, EntityNotFoundException, InvalidStateTransitionException, InvalidLoginException
+    DomainException,
+    EntityNotFoundException,
+    ServiceNotFoundException,
+    InvalidIncidentException,
+    InvalidStateTransitionException,
+    InvalidLoginException,
+    UnauthorizedActionException,
+    WorkloadExceededException,
+    MissingSLAConfigException,
+    DuplicateIncidentException,
+    DatabaseFailureException,
+    NetworkFailureException,
+    InvalidUserInputException
 )
 from backend.app.infrastructure.persistence.in_memory_repo import (
     InMemoryIncidentRepository, InMemoryUserRepository, InMemoryServiceRepository
@@ -56,35 +73,41 @@ def seed_data():
         service_id="srv-payment",
         name="Payment Gateway",
         description="Processes credit cards, UPI, and banking transactions",
-        tier=ServiceTier.TIER_1_CRITICAL
+        tier=ServiceTier.TIER_1_CRITICAL,
+        dependencies=["srv-db", "srv-auth"]
     )
     srv_auth = ITService(
         service_id="srv-auth",
         name="Single Sign-On (SSO)",
         description="Central authentication and LDAP service",
-        tier=ServiceTier.TIER_1_CRITICAL
+        tier=ServiceTier.TIER_1_CRITICAL,
+        dependencies=["srv-db"]
     )
     srv_db = ITService(
         service_id="srv-db",
         name="Core PostgreSQL DB",
         description="Primary organizational relational database clusters",
-        tier=ServiceTier.TIER_1_CRITICAL
+        tier=ServiceTier.TIER_1_CRITICAL,
+        dependencies=[]
     )
     srv_cloud = ITService(
         service_id="srv-cloud",
         name="Cloud Storage & CDN",
         description="S3 buckets and media delivery assets",
-        tier=ServiceTier.TIER_2
+        tier=ServiceTier.TIER_2,
+        dependencies=["srv-auth"]
     )
     srv_email = ITService(
         service_id="srv-email",
         name="Internal Mail Exchange",
         description="Corporate messaging and communication",
-        tier=ServiceTier.TIER_3
+        tier=ServiceTier.TIER_3,
+        dependencies=["srv-cloud"]
     )
 
     for s in [srv_payment, srv_auth, srv_db, srv_cloud, srv_email]:
         service_repo.save(s)
+
 
     # 2. Users (all seeded with password: password123)
     default_hash = User.hash_password("password123")
@@ -237,6 +260,42 @@ class VerifyRequest(BaseModel):
     actor_id: str
     is_confirmed: bool
     feedback: str = ""
+
+
+class ServiceCreateOrUpdateRequest(BaseModel):
+    name: str = Field(..., min_length=2)
+    description: str = Field(..., min_length=5)
+    tier: str = "BUSINESS_CRITICAL"
+    dependencies: List[str] = []
+    admin_id: Optional[str] = None
+
+
+class AssignmentStrategyChangeRequest(BaseModel):
+    strategy: str
+    admin_id: Optional[str] = None
+
+
+class SLAPolicyUpdateRequest(BaseModel):
+    priority: str
+    response_minutes: int
+    resolution_minutes: int
+    admin_id: Optional[str] = None
+
+
+class CategoryCreateRequest(BaseModel):
+    name: str
+    keywords: List[str]
+    admin_id: Optional[str] = None
+
+
+class RequestInfoRequest(BaseModel):
+    technician_id: str
+    question: str
+
+
+class AddInfoRequest(BaseModel):
+    actor_id: str
+    info_text: str
 
 
 def format_iso_utc(dt: Optional[datetime]) -> Optional[str]:
@@ -597,7 +656,133 @@ def forgot_password(req: ForgotPasswordRequest):
 @app.get("/api/services")
 def get_services():
     services = service_repo.get_all()
-    return [{"id": s.id, "name": s.name, "description": s.description, "tier": s.tier.value} for s in services]
+    return [{
+        "id": s.id,
+        "name": s.name,
+        "description": s.description,
+        "tier": s.tier.value,
+        "dependencies": getattr(s, "dependencies", [])
+    } for s in services]
+
+
+@app.post("/api/services", status_code=status.HTTP_201_CREATED)
+def create_service(req: ServiceCreateOrUpdateRequest):
+    if req.admin_id:
+        user = user_repo.get_by_id(req.admin_id)
+        if user and user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Unauthorized: Only Administrators can create IT services.")
+    try:
+        tier_enum = ServiceTier[req.tier.upper()]
+    except KeyError:
+        tier_enum = ServiceTier.BUSINESS_CRITICAL
+    new_srv = ITService(
+        name=req.name,
+        description=req.description,
+        tier=tier_enum,
+        dependencies=req.dependencies
+    )
+    service_repo.save(new_srv)
+    return {
+        "id": new_srv.id,
+        "name": new_srv.name,
+        "description": new_srv.description,
+        "tier": new_srv.tier.value,
+        "dependencies": new_srv.dependencies
+    }
+
+
+@app.put("/api/services/{service_id}")
+def update_service(service_id: str, req: ServiceCreateOrUpdateRequest):
+    if req.admin_id:
+        user = user_repo.get_by_id(req.admin_id)
+        if user and user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Unauthorized: Only Administrators can edit IT services.")
+    srv = service_repo.get_by_id(service_id)
+    if not srv:
+        raise HTTPException(status_code=404, detail=f"Service with ID '{service_id}' not found.")
+    try:
+        tier_enum = ServiceTier[req.tier.upper()]
+    except KeyError:
+        tier_enum = srv.tier
+    srv.name = req.name
+    srv.description = req.description
+    srv.tier = tier_enum
+    srv.dependencies = req.dependencies
+    service_repo.save(srv)
+    return {
+        "id": srv.id,
+        "name": srv.name,
+        "description": srv.description,
+        "tier": srv.tier.value,
+        "dependencies": srv.dependencies
+    }
+
+
+@app.get("/api/admin/config")
+def get_admin_config():
+    from backend.app.domain.intelligence.categorizer import IntelligentCategorizer
+    services = service_repo.get_all()
+    sample_policy = services[0].sla_policy if services else None
+    targets = sample_policy.to_dict()["targets"] if sample_policy else {}
+    return {
+        "active_assignment_strategy": incident_service.get_default_assignment_strategy(),
+        "available_strategies": ["smart", "skill", "load", "round_robin"],
+        "sla_targets": targets,
+        "categories": IntelligentCategorizer.get_all_categories()
+    }
+
+
+@app.post("/api/admin/assignment-strategy")
+def set_assignment_strategy(req: AssignmentStrategyChangeRequest):
+    if req.admin_id:
+        user = user_repo.get_by_id(req.admin_id)
+        if user and user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Unauthorized: Only Administrators can switch assignment strategy.")
+    incident_service.set_default_assignment_strategy(req.strategy)
+    return {
+        "status": "success",
+        "active_assignment_strategy": incident_service.get_default_assignment_strategy(),
+        "message": f"Active technician assignment strategy updated to '{req.strategy}'."
+    }
+
+
+@app.put("/api/admin/sla-policy")
+def update_sla_policy(req: SLAPolicyUpdateRequest):
+    if req.admin_id:
+        user = user_repo.get_by_id(req.admin_id)
+        if user and user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Unauthorized: Only Administrators can update SLA policy.")
+    try:
+        p_enum = Priority[req.priority.upper()]
+    except KeyError:
+        raise HTTPException(status_code=400, detail=f"Invalid priority tier: {req.priority}")
+    services = service_repo.get_all()
+    for s in services:
+        s.sla_policy.update_target(p_enum, req.response_minutes, req.resolution_minutes)
+        service_repo.save(s)
+    return {
+        "status": "success",
+        "priority": req.priority.upper(),
+        "response_minutes": req.response_minutes,
+        "resolution_minutes": req.resolution_minutes,
+        "message": f"SLA policy for {req.priority.upper()} updated ({req.response_minutes}m response / {req.resolution_minutes}m resolution)."
+    }
+
+
+@app.post("/api/admin/categories")
+def add_or_update_category(req: CategoryCreateRequest):
+    if req.admin_id:
+        user = user_repo.get_by_id(req.admin_id)
+        if user and user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=403, detail="Unauthorized: Only Administrators can add categories.")
+    from backend.app.domain.intelligence.categorizer import IntelligentCategorizer
+    IntelligentCategorizer.add_or_update_category(req.name, req.keywords)
+    return {
+        "status": "success",
+        "category": req.name,
+        "keywords": req.keywords,
+        "message": f"Category '{req.name}' successfully registered with {len(req.keywords)} detection keywords."
+    }
 
 
 @app.get("/api/users")
@@ -662,7 +847,7 @@ def report_incident(req: IncidentCreateRequest):
             urgency=req.urgency,
             category=req.category,
             auto_assign=req.auto_assign,
-            assignment_strategy=req.assignment_strategy
+            assignment_strategy=req.assignment_strategy if req.assignment_strategy != "smart" else incident_service.get_default_assignment_strategy()
         )
         return {
             "incident": serialize_incident(inc),
@@ -733,6 +918,24 @@ def close_incident(incident_id: str, actor_id: str = Query(...)):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.post("/api/incidents/{incident_id}/request-info")
+def request_additional_info(incident_id: str, req: RequestInfoRequest):
+    try:
+        inc = incident_service.request_additional_info(incident_id, req.technician_id, req.question)
+        return serialize_incident(inc)
+    except DomainException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/incidents/{incident_id}/add-info")
+def add_additional_info(incident_id: str, req: AddInfoRequest):
+    try:
+        inc = incident_service.add_additional_info(incident_id, req.actor_id, req.info_text)
+        return serialize_incident(inc)
+    except DomainException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
 @app.post("/api/sla/trigger-cycle")
 def trigger_sla_cycle():
     """Manual trigger to execute SLA monitoring cycle and auto-escalation."""
@@ -760,6 +963,24 @@ def get_notifications(recipient: Optional[str] = None):
         "smtp_configured": smtp_configured,
         "observer_dispatches": incident_service.notification_observer.dispatched_notifications
     }
+
+
+@app.get("/api/in-app-notifications")
+def get_in_app_notifications(user_id: Optional[str] = None, unread_only: bool = False):
+    """Channel 2: In-App / Dashboard Notification Center."""
+    return incident_service.in_app_notification_observer.get_user_notifications(user_id, unread_only)
+
+
+@app.post("/api/in-app-notifications/{notification_id}/read")
+def mark_in_app_notification_read(notification_id: str):
+    success = incident_service.in_app_notification_observer.mark_as_read(notification_id)
+    return {"status": "success" if success else "not_found", "notification_id": notification_id}
+
+
+@app.post("/api/in-app-notifications/mark-all-read")
+def mark_all_in_app_notifications_read(user_id: str = Query(...)):
+    count = incident_service.in_app_notification_observer.mark_all_read(user_id)
+    return {"status": "success", "marked_read_count": count}
 
 
 @app.post("/api/notifications/test-email")
@@ -855,4 +1076,114 @@ def get_executive_summary():
         "technicians": tech_roster,
         "total_incident_records": len(all_incidents)
     }
+
+
+@app.get("/api/incidents/{incident_id}/suggested-resolutions")
+def get_suggested_resolutions(incident_id: str):
+    """
+    Retrieves intelligent resolution recommendations for an incident (Feature G & Innovation Challenge).
+    Combines historical resolution NLP pattern matching with standard operating procedure runbooks.
+    """
+    try:
+        recommendations = incident_service.get_suggested_resolutions(incident_id)
+        return {
+            "incident_id": incident_id,
+            "total_suggestions": len(recommendations),
+            "recommendations": recommendations
+        }
+    except DomainException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to fetch suggested resolutions: {str(e)}")
+
+
+@app.get("/api/services/topology")
+def get_service_topology():
+    """
+    Retrieves live organizational IT service dependency topology graph and operational health states.
+    Fulfills Innovation Challenge: Service Dependency Graph & Incident Correlation.
+    """
+    try:
+        return incident_service.get_service_topology()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to compute service topology: {str(e)}")
+
+
+class AIRunbookRequest(BaseModel):
+    incident_id: str
+    custom_context: Optional[str] = None
+
+
+@app.post("/api/ai/generate-resolution-runbook")
+def generate_ai_runbook(req: AIRunbookRequest):
+    """
+    Generative AI Runbook Generator (Innovation Pillar).
+    If GEMINI_API_KEY / Google API is set, invokes Gemini; otherwise provides smart context runbook.
+    """
+    try:
+        incident = incident_service.get_incident(req.incident_id)
+        api_key = os.environ.get("GEMINI_API_KEY")
+        
+        # If Gemini API Key is available in the environment, attempt real Gemini call
+        if api_key:
+            try:
+                import urllib.request
+                import json as json_lib
+                prompt = (
+                    f"You are a Principal Site Reliability Engineer. Provide an exact 4-step diagnostic and "
+                    f"resolution runbook for this enterprise IT incident:\n"
+                    f"Title: {incident.title}\n"
+                    f"Description: {incident.description}\n"
+                    f"Service: {incident.service.name}\n"
+                    f"Priority: {incident.priority.value}\n"
+                    f"Category: {incident.category}\n"
+                    f"Return concise, actionable technical CLI commands and verification steps."
+                )
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+                data = json_lib.dumps({
+                    "contents": [{"parts": [{"text": prompt}]}]
+                }).encode("utf-8")
+                req_obj = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req_obj, timeout=8) as response:
+                    res_json = json_lib.loads(response.read().decode("utf-8"))
+                    generated_text = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                    return {
+                        "incident_id": req.incident_id,
+                        "source": "GOOGLE_GEMINI_AI",
+                        "runbook": generated_text,
+                        "powered_by": "Gemini 1.5 Flash API"
+                    }
+            except Exception:
+                pass  # Fall through to deterministic expert system runbook
+
+        # Deterministic Expert SRE Runbook Generator
+        cat = incident.category.lower() if incident.category else "general"
+        expert_runbook = (
+            f"### [Automated Diagnostic Runbook - {incident.category.upper()}]\n"
+            f"**Target System:** {incident.service.name} ({incident.service.tier.value})\n"
+            f"**Severity Tier:** {incident.priority.value}\n\n"
+            f"**Step 1: Rapid Telemetry & Fault Isolation**\n"
+            f"- Verify service responsiveness and HTTP/gRPC ingress metrics.\n"
+            f"- Inspect error rate spikes for keyword '{incident.category}'.\n\n"
+            f"**Step 2: State Rollback or Safe Restart**\n"
+            f"- Drain in-flight sessions and trigger graceful rolling pod/service restart.\n"
+            f"- Check connection pools and clear stale socket locks.\n\n"
+            f"**Step 3: Root Cause Correction**\n"
+            f"- Apply schema patch / rotate expired security credentials if authentication related.\n"
+            f"- Validate CPU/Memory pressure stabilizes below 60% threshold.\n\n"
+            f"**Step 4: Verification & SLA Closure**\n"
+            f"- Submit probe transaction to `{incident.service.name}` and confirm HTTP 200 response.\n"
+            f"- Notify {incident.reporter.full_name} and record audit postmortem."
+        )
+        return {
+            "incident_id": req.incident_id,
+            "source": "AI_EXPERT_SRE_ENGINE",
+            "runbook": expert_runbook,
+            "powered_by": "I-ITSM Intelligent SRE Engine"
+        }
+    except DomainException as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating runbook: {str(e)}")
+
 
