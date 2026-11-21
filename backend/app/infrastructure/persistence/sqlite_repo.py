@@ -39,6 +39,7 @@ class UserModel(Base):
     is_available = Column(Boolean, default=True)
     experience_years = Column(Float, default=2.0)
     performance_rating = Column(Float, default=4.5)
+    hashed_password = Column(String(128), default="")
     is_active = Column(Boolean, default=True)
 
 
@@ -224,6 +225,14 @@ class SqliteIncidentRepository(IIncidentRepository):
         with self.session_factory() as session:
             return session.query(IncidentModel).count()
 
+    @staticmethod
+    def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+
     def _to_domain(self, model: IncidentModel, session) -> Incident:
         service = self.service_repo.get_by_id(model.service_id)
         reporter = self.user_repo.get_by_id(model.reporter_id)
@@ -239,7 +248,7 @@ class SqliteIncidentRepository(IIncidentRepository):
             priority=Priority(model.priority),
             category=model.category,
             incident_id=model.id,
-            created_at=model.created_at,
+            created_at=self._ensure_utc(model.created_at),
             sla_target=target
         )
 
@@ -252,11 +261,11 @@ class SqliteIncidentRepository(IIncidentRepository):
             if isinstance(tech, Technician):
                 inc.assigned_technician = tech
 
-        # Rehydrate SLA Tracker
-        inc.sla_tracker.response_deadline = model.response_deadline
-        inc.sla_tracker.resolution_deadline = model.resolution_deadline
-        inc.sla_tracker.responded_at = model.responded_at
-        inc.sla_tracker.resolved_at = model.resolved_at
+        # Rehydrate SLA Tracker with UTC normalized timestamps
+        inc.sla_tracker.response_deadline = self._ensure_utc(model.response_deadline)
+        inc.sla_tracker.resolution_deadline = self._ensure_utc(model.resolution_deadline)
+        inc.sla_tracker.responded_at = self._ensure_utc(model.responded_at)
+        inc.sla_tracker.resolved_at = self._ensure_utc(model.resolved_at)
         inc.sla_tracker.is_breached = model.is_breached
 
         # Rehydrate Notes & Feedback
@@ -267,7 +276,7 @@ class SqliteIncidentRepository(IIncidentRepository):
         inc.is_duplicate = model.is_duplicate
         inc.duplicate_of_id = model.duplicate_of_id
 
-        # Rehydrate Audit Logs
+        # Rehydrate Audit Logs with UTC normalized timestamps
         audit_models = session.query(AuditModel).filter_by(incident_id=model.id).order_by(AuditModel.timestamp.asc()).all()
         inc.audit_logs = [
             AuditRecord(
@@ -279,7 +288,7 @@ class SqliteIncidentRepository(IIncidentRepository):
                 new_state=a.new_state,
                 description=a.description,
                 record_id=a.id,
-                timestamp=a.timestamp
+                timestamp=self._ensure_utc(a.timestamp)
             )
             for a in audit_models
         ]
@@ -303,6 +312,7 @@ class SqliteUserRepository(IUserRepository):
             model.full_name = user.full_name
             model.role = user.role.value
             model.is_active = user.is_active
+            model.hashed_password = user.hashed_password
 
             if isinstance(user, Employee):
                 model.department = user.department
@@ -326,7 +336,7 @@ class SqliteUserRepository(IUserRepository):
 
     def get_by_email(self, email: str) -> Optional[User]:
         with self.session_factory() as session:
-            model = session.query(UserModel).filter(UserModel.email.ilike(email)).first()
+            model = session.query(UserModel).filter(UserModel.email.ilike(email.strip())).first()
             if not model:
                 return None
             return self._to_domain(model)
@@ -349,6 +359,7 @@ class SqliteUserRepository(IUserRepository):
 
     def _to_domain(self, model: UserModel) -> User:
         role = UserRole(model.role)
+        pwd = getattr(model, "hashed_password", "") or ""
         if role == UserRole.TECHNICIAN:
             skills = json.loads(model.skills) if model.skills else []
             return Technician(
@@ -361,6 +372,7 @@ class SqliteUserRepository(IUserRepository):
                 experience_years=model.experience_years,
                 performance_rating=model.performance_rating,
                 user_id=model.id,
+                hashed_password=pwd,
                 is_active=model.is_active
             )
         elif role == UserRole.ADMIN:
@@ -368,6 +380,7 @@ class SqliteUserRepository(IUserRepository):
                 email=model.email,
                 full_name=model.full_name,
                 user_id=model.id,
+                hashed_password=pwd,
                 is_active=model.is_active
             )
         else:
@@ -376,6 +389,7 @@ class SqliteUserRepository(IUserRepository):
                 full_name=model.full_name,
                 department=model.department or "General",
                 user_id=model.id,
+                hashed_password=pwd,
                 is_active=model.is_active
             )
 

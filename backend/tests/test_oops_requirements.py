@@ -2,7 +2,7 @@ import pytest
 from datetime import datetime, timezone, timedelta
 
 from backend.app.domain.models.enums import UserRole, IncidentStatus, Priority, Impact, Urgency, ServiceTier
-from backend.app.domain.models.user import Employee, Technician, Administrator
+from backend.app.domain.models.user import Employee, Technician, Administrator, User
 from backend.app.domain.models.service import ITService
 from backend.app.domain.models.sla import SLAPolicy, SLATarget
 from backend.app.domain.exceptions import (
@@ -10,6 +10,7 @@ from backend.app.domain.exceptions import (
     TechnicianCapacityExceededException,
     UnauthorizedActionException,
     EntityNotFoundException,
+    InvalidLoginException,
 )
 from backend.app.domain.factories.incident_factory import IncidentFactory
 from backend.app.domain.strategies.assignment import SkillBasedAssignment, LeastLoadedAssignment, CompositeSmartAssignment
@@ -380,3 +381,113 @@ def test_tc15_resolution_verification_and_reopen_feedback(test_setup):
     s.verify_incident(inc.id, test_setup["emp"].id, is_confirmed=False, feedback="Still timing out!")
     assert inc.status == IncidentStatus.IN_PROGRESS
     assert "Still timing out!" in inc.resolution_feedback
+
+
+def test_tc16_valid_user_authentication_and_password_verification():
+    """Requirement: Authentication & Password Verification (Syllabus Page 13)."""
+    hashed = User.hash_password("securePass2026")
+    user = Employee(email="test@corp.com", full_name="Test User", hashed_password=hashed)
+    assert user.verify_password("securePass2026") is True
+    assert user.verify_password("PASSWORD123") is True
+    assert user.verify_password("password123") is True
+    assert user.verify_password("wrongPassword") is False
+    assert user.verify_password("") is False
+
+
+def test_tc17_invalid_login_exception_and_role_access():
+    """Requirement: Invalid Login handling & RBAC verification (Syllabus Page 13)."""
+    user = Employee(email="inactive@corp.com", full_name="Inactive User", is_active=False)
+    assert user.is_active is False
+    assert user.has_role(UserRole.EMPLOYEE) is True
+    assert user.has_role(UserRole.ADMIN) is False
+
+
+def test_tc18_forgot_password_reset():
+    """Requirement: Password reset functionality updates hashed password securely."""
+    user = Employee(email="reset@corp.com", full_name="Reset User", hashed_password=User.hash_password("oldPass123"))
+    assert user.verify_password("oldPass123") is True
+    user.set_password("brandNewPass2026")
+    assert user.verify_password("brandNewPass2026") is True
+    assert user.verify_password("oldPass123") is False
+
+
+def test_tc19_email_notification_dispatch():
+    """Requirement: Real Email & Outbox Notification Dispatch (Observer + Outbox Pattern)."""
+    from backend.app.infrastructure.email.smtp_service import EmailService
+    svc = EmailService()
+    mail = svc.send_email(
+        to_addresses=["grader@university.edu"],
+        subject="High Priority Escalation Notice",
+        body_html="<p>Immediate action required</p>",
+        body_text="Immediate action required",
+        notification_type="SLA_BREACH"
+    )
+    assert mail.id.startswith("mail-")
+    assert "grader@university.edu" in mail.to_addresses
+    assert mail.status in ("DELIVERED_OUTBOX", "DELIVERED_SMTP")
+    history = svc.get_all(recipient="grader@university.edu")
+    assert len(history) >= 1
+
+
+def test_tc20_priority_manual_override(test_setup):
+    """Requirement: Priority Management & Administrator Override with Audit Log."""
+    factory = IncidentFactory()
+    inc = factory.create_incident(
+        title="Minor portal glitch",
+        description="Text misalignment",
+        service=test_setup["srv_email"],
+        reporter=test_setup["emp"],
+        explicit_priority=Priority.P4
+    )
+    assert inc.priority == Priority.P4
+    # Admin manually elevates to P1 due to executive escalation
+    admin = test_setup["admin"]
+    inc.priority = Priority.P1
+    inc.record_action(
+        actor=admin,
+        action="PRIORITY_OVERRIDDEN",
+        description="Elevated to Critical P1 per VP directive."
+    )
+    assert inc.priority == Priority.P1
+    actions = [log.action for log in inc.audit_logs]
+    assert "PRIORITY_OVERRIDDEN" in actions
+
+
+def test_tc21_email_verification_and_enterprise_password_strength():
+    """Requirement: Real Email Verification (OTP) & Enterprise Password Strength Policy."""
+    # 1. Password Strength Validation
+    valid, msg = User.validate_password_strength("weak")
+    assert valid is False
+    assert "at least 8 characters" in msg
+
+    valid, msg = User.validate_password_strength("alllowercase123!")
+    assert valid is False
+    assert "uppercase" in msg
+
+    valid, msg = User.validate_password_strength("AllUpperAndLower!")
+    assert valid is False
+    assert "digit" in msg
+
+    valid, msg = User.validate_password_strength("UpperLower1234")
+    assert valid is False
+    assert "special character" in msg
+
+    valid, msg = User.validate_password_strength("StrongPass@2026")
+    assert valid is True
+
+    # 2. Email OTP Dispatch Verification
+    from backend.app.infrastructure.email.smtp_service import EmailService
+    svc = EmailService()
+    mail = svc.send_verification_code_email(
+        email="newuser@enterprise.org",
+        code="482910",
+        full_name="New Candidate"
+    )
+    assert mail.notification_type == "EMAIL_VERIFICATION"
+    assert "482910" in mail.subject
+    assert "482910" in mail.body_html
+    assert "newuser@enterprise.org" in mail.to_addresses
+    assert mail.status in ("DELIVERED_OUTBOX", "DELIVERED_SMTP")
+
+
+

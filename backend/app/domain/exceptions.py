@@ -5,6 +5,11 @@ class DomainException(Exception):
         self.message = message
 
 
+class InvalidLoginException(DomainException):
+    """Raised when authentication fails due to invalid credentials, incorrect password, or inactive account."""
+    pass
+
+
 class InvalidStateTransitionException(DomainException):
     """Raised when an incident is commanded to transition into an invalid lifecycle state."""
     def __init__(self, from_state: str, to_state: str, reason: str = ""):
@@ -44,3 +49,14 @@ class EntityNotFoundException(DomainException):
 class DuplicateIncidentException(DomainException):
     """Raised when a duplicate incident report is detected."""
     pass
+
+
+class WeakPasswordException(DomainException):
+    """Raised when a password fails the enterprise security strength policy."""
+    pass
+
+
+class InvalidVerificationCodeException(DomainException):
+    """Raised when an email verification code is invalid, mismatched, or expired."""
+    pass
+

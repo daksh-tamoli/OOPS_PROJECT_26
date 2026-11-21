@@ -1,5 +1,8 @@
 import asyncio
-from typing import List, Optional
+import secrets
+import uuid
+from datetime import datetime, timezone, timedelta
+from typing import List, Optional, Dict, Any
 from fastapi import FastAPI, HTTPException, Query, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -7,7 +10,9 @@ from pydantic import BaseModel, Field
 from backend.app.domain.models.enums import UserRole, IncidentStatus, Priority, Impact, Urgency, ServiceTier
 from backend.app.domain.models.user import Employee, Technician, Administrator, User
 from backend.app.domain.models.service import ITService
-from backend.app.domain.exceptions import DomainException, EntityNotFoundException, InvalidStateTransitionException
+from backend.app.domain.exceptions import (
+    DomainException, EntityNotFoundException, InvalidStateTransitionException, InvalidLoginException
+)
 from backend.app.infrastructure.persistence.in_memory_repo import (
     InMemoryIncidentRepository, InMemoryUserRepository, InMemoryServiceRepository
 )
@@ -81,23 +86,27 @@ def seed_data():
     for s in [srv_payment, srv_auth, srv_db, srv_cloud, srv_email]:
         service_repo.save(s)
 
-    # 2. Users
+    # 2. Users (all seeded with password: password123)
+    default_hash = User.hash_password("password123")
     admin = Administrator(
         user_id="user-admin-1",
         email="admin@itsm.local",
-        full_name="Sarah Connor (IT Manager)"
+        full_name="Sarah Connor (IT Manager)",
+        hashed_password=default_hash
     )
     emp1 = Employee(
         user_id="user-emp-1",
         email="alice@company.com",
         full_name="Alice Smith (Finance)",
-        department="Finance"
+        department="Finance",
+        hashed_password=default_hash
     )
     emp2 = Employee(
         user_id="user-emp-2",
         email="john@company.com",
         full_name="John Doe (Engineering)",
-        department="Engineering"
+        department="Engineering",
+        hashed_password=default_hash
     )
 
     # Technicians with specialized skills & loads
@@ -109,7 +118,8 @@ def seed_data():
         max_active_load=4,
         current_active_load=0,
         experience_years=5.0,
-        performance_rating=4.9
+        performance_rating=4.9,
+        hashed_password=default_hash
     )
     tech2 = Technician(
         user_id="tech-102",
@@ -119,7 +129,8 @@ def seed_data():
         max_active_load=5,
         current_active_load=0,
         experience_years=4.0,
-        performance_rating=4.7
+        performance_rating=4.7,
+        hashed_password=default_hash
     )
     tech3 = Technician(
         user_id="tech-103",
@@ -129,7 +140,8 @@ def seed_data():
         max_active_load=3,
         current_active_load=0,
         experience_years=3.2,
-        performance_rating=4.5
+        performance_rating=4.5,
+        hashed_password=default_hash
     )
 
     for u in [admin, emp1, emp2, tech1, tech2, tech3]:
@@ -142,6 +154,57 @@ seed_data()
 # ==============================================================================
 # Pydantic Request / Response Schemas
 # ==============================================================================
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    password: str = Field(..., min_length=1)
+
+
+class RegisterRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    full_name: str = Field(..., min_length=2)
+    password: str = Field(..., min_length=4)
+    department: str = "General"
+    role: str = "EMPLOYEE"
+
+
+class SendVerificationRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    full_name: str = Field(..., min_length=2)
+    password: str = Field(..., min_length=4)
+    department: str = "General"
+    role: str = "EMPLOYEE"
+
+
+class VerifyRegisterRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    code: str = Field(..., min_length=4, max_length=10)
+
+
+class ResendCodeRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+
+
+# In-memory storage for pending email verifications {email: {code, expires_at, full_name, hashed_password, department, role}}
+pending_verifications: Dict[str, dict] = {}
+
+
+class ForgotPasswordRequest(BaseModel):
+    email: str = Field(..., min_length=3)
+    new_password: str = Field(..., min_length=4)
+
+
+class PriorityOverrideRequest(BaseModel):
+    new_priority: Priority
+    reason: str = Field(..., min_length=3)
+    admin_id: str
+
+
+class TestEmailRequest(BaseModel):
+    to_email: str = Field(..., min_length=3)
+    subject: str = "Test Email from I-ITSM"
+    message: str = "This confirms real email notification dispatch functionality on the Enterprise I-ITSM platform."
+
+
 class IncidentCreateRequest(BaseModel):
     title: str = Field(..., min_length=3)
     description: str = Field(..., min_length=5)
@@ -176,6 +239,16 @@ class VerifyRequest(BaseModel):
     feedback: str = ""
 
 
+def format_iso_utc(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    else:
+        dt = dt.astimezone(timezone.utc)
+    return dt.isoformat()
+
+
 # Serializer helper
 def serialize_incident(inc) -> dict:
     return {
@@ -200,12 +273,12 @@ def serialize_incident(inc) -> dict:
             "name": inc.assigned_technician.full_name,
             "email": inc.assigned_technician.email
         } if inc.assigned_technician else None,
-        "created_at": inc.created_at.isoformat(),
+        "created_at": format_iso_utc(inc.created_at),
         "sla": {
-            "response_deadline": inc.sla_tracker.response_deadline.isoformat(),
-            "resolution_deadline": inc.sla_tracker.resolution_deadline.isoformat(),
-            "responded_at": inc.sla_tracker.responded_at.isoformat() if inc.sla_tracker.responded_at else None,
-            "resolved_at": inc.sla_tracker.resolved_at.isoformat() if inc.sla_tracker.resolved_at else None,
+            "response_deadline": format_iso_utc(inc.sla_tracker.response_deadline),
+            "resolution_deadline": format_iso_utc(inc.sla_tracker.resolution_deadline),
+            "responded_at": format_iso_utc(inc.sla_tracker.responded_at),
+            "resolved_at": format_iso_utc(inc.sla_tracker.resolved_at),
             "is_breached": inc.sla_tracker.check_breach(),
             "is_at_risk": inc.sla_tracker.is_resolution_at_risk()
         },
@@ -223,7 +296,302 @@ def serialize_incident(inc) -> dict:
 
 @app.get("/api/health")
 def health_check():
-    return {"status": "healthy", "service": "I-ITSM Platform"}
+    return {
+        "status": "healthy",
+        "service": "I-ITSM Platform",
+        "system_time": format_iso_utc(datetime.now(timezone.utc))
+    }
+
+
+# ==============================================================================
+# Authentication & User Management (Page 4, 13)
+# ==============================================================================
+
+@app.post("/api/auth/login")
+def login(req: LoginRequest):
+    user = user_repo.get_by_email(req.email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid login: No account found with this corporate email address."
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive or suspended. Contact IT administrator."
+        )
+    if not user.verify_password(req.password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid login: Incorrect password entered."
+        )
+    return {
+        "status": "authenticated",
+        "token": f"token-{user.id}-{uuid.uuid4().hex[:8]}",
+        "user": {
+            "id": user.id,
+            "name": user.full_name,
+            "email": user.email,
+            "role": user.role.value,
+            "department": getattr(user, "department", "General"),
+            "skills": getattr(user, "skills", [])
+        }
+    }
+
+
+@app.post("/api/auth/send-verification")
+def send_verification(req: SendVerificationRequest):
+    norm_email = req.email.strip().lower()
+    existing = user_repo.get_by_email(norm_email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Registration Error: An account with this corporate email already exists."
+        )
+    # Enforce strict enterprise password strength
+    is_strong, msg = User.validate_password_strength(req.password)
+    if not is_strong:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Weak Password Rejected: {msg}"
+        )
+    # Generate secure 6-digit OTP code
+    code = f"{secrets.randbelow(900000) + 100000}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    pending_verifications[norm_email] = {
+        "code": code,
+        "expires_at": expires_at,
+        "full_name": req.full_name.strip(),
+        "email": norm_email,
+        "department": req.department.strip() or "General",
+        "role": req.role.strip().upper(),
+        "hashed_password": User.hash_password(req.password)
+    }
+
+    # Dispatch real email via SMTP service (and recorded in outbox)
+    try:
+        from backend.app.infrastructure.email.smtp_service import EmailService
+        EmailService().send_verification_code_email(
+            email=norm_email,
+            code=code,
+            full_name=req.full_name.strip()
+        )
+    except Exception as e:
+        print(f"Warning: Failed to send verification email: {e}")
+
+    return {
+        "status": "code_sent",
+        "message": f"6-digit verification code has been dispatched to {norm_email}.",
+        "email": norm_email,
+        "expires_in_minutes": 10
+    }
+
+
+@app.post("/api/auth/verify-and-register", status_code=status.HTTP_201_CREATED)
+def verify_and_register(req: VerifyRegisterRequest):
+    norm_email = req.email.strip().lower()
+    code_entered = req.code.strip()
+
+    entry = pending_verifications.get(norm_email)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No pending verification found for this email. Please request a new verification code."
+        )
+
+    if datetime.now(timezone.utc) > entry["expires_at"]:
+        pending_verifications.pop(norm_email, None)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Verification code has expired (valid for 10 minutes). Please request a new code."
+        )
+
+    if entry["code"] != code_entered:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid 6-digit verification code. Please check your email inbox and enter the correct code."
+        )
+
+    # Verification successful: pop and instantiate user
+    pending_verifications.pop(norm_email, None)
+    user_id = f"user-{uuid.uuid4().hex[:6]}"
+
+    if entry["role"] == "ADMIN":
+        new_user = Administrator(
+            email=entry["email"],
+            full_name=entry["full_name"],
+            user_id=user_id,
+            hashed_password=entry["hashed_password"]
+        )
+    elif entry["role"] == "TECHNICIAN":
+        new_user = Technician(
+            email=entry["email"],
+            full_name=entry["full_name"],
+            user_id=user_id,
+            hashed_password=entry["hashed_password"]
+        )
+    else:
+        new_user = Employee(
+            email=entry["email"],
+            full_name=entry["full_name"],
+            department=entry["department"],
+            user_id=user_id,
+            hashed_password=entry["hashed_password"]
+        )
+
+    user_repo.save(new_user)
+
+    # Dispatch Real Welcome Email
+    try:
+        from backend.app.infrastructure.email.smtp_service import EmailService
+        EmailService().send_welcome_email(
+            email=new_user.email,
+            full_name=new_user.full_name,
+            role=new_user.role.value,
+            department=getattr(new_user, "department", "General")
+        )
+    except Exception:
+        pass
+
+    return {
+        "status": "authenticated",
+        "token": f"token-{new_user.id}-{uuid.uuid4().hex[:8]}",
+        "message": "Email verified! Account created and logged in successfully.",
+        "user": {
+            "id": new_user.id,
+            "name": new_user.full_name,
+            "email": new_user.email,
+            "role": new_user.role.value,
+            "department": getattr(new_user, "department", "General"),
+            "skills": getattr(new_user, "skills", [])
+        }
+    }
+
+
+@app.post("/api/auth/resend-code")
+def resend_verification_code(req: ResendCodeRequest):
+    norm_email = req.email.strip().lower()
+    entry = pending_verifications.get(norm_email)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No pending registration found for this email. Please fill the registration form first."
+        )
+    new_code = f"{secrets.randbelow(900000) + 100000}"
+    entry["code"] = new_code
+    entry["expires_at"] = datetime.now(timezone.utc) + timedelta(minutes=10)
+
+    try:
+        from backend.app.infrastructure.email.smtp_service import EmailService
+        EmailService().send_verification_code_email(
+            email=norm_email,
+            code=new_code,
+            full_name=entry["full_name"]
+        )
+    except Exception as e:
+        print(f"Warning: Failed to resend verification email: {e}")
+
+    return {
+        "status": "code_resent",
+        "message": f"A new 6-digit verification code has been dispatched to {norm_email}."
+    }
+
+
+@app.post("/api/auth/register", status_code=status.HTTP_201_CREATED)
+def register(req: RegisterRequest):
+    norm_email = req.email.strip().lower()
+    existing = user_repo.get_by_email(norm_email)
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="User registration error: An account with this corporate email already exists."
+        )
+    # Enforce password strength policy
+    is_strong, msg = User.validate_password_strength(req.password)
+    if not is_strong:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Weak Password Rejected: {msg}"
+        )
+    hashed = User.hash_password(req.password)
+    user_id = f"user-{uuid.uuid4().hex[:6]}"
+
+    if req.role.upper() == "ADMIN":
+        new_user = Administrator(
+            email=norm_email,
+            full_name=req.full_name.strip(),
+            user_id=user_id,
+            hashed_password=hashed
+        )
+    elif req.role.upper() == "TECHNICIAN":
+        new_user = Technician(
+            email=norm_email,
+            full_name=req.full_name.strip(),
+            user_id=user_id,
+            hashed_password=hashed
+        )
+    else:
+        new_user = Employee(
+            email=norm_email,
+            full_name=req.full_name.strip(),
+            department=req.department.strip() or "General",
+            user_id=user_id,
+            hashed_password=hashed
+        )
+
+    user_repo.save(new_user)
+
+    # Dispatch Real Welcome Email
+    try:
+        from backend.app.infrastructure.email.smtp_service import EmailService
+        EmailService().send_welcome_email(
+            email=new_user.email,
+            full_name=new_user.full_name,
+            role=new_user.role.value,
+            department=getattr(new_user, "department", "General")
+        )
+    except Exception:
+        pass
+
+    return {
+        "status": "registered",
+        "message": "User registered successfully.",
+        "user": {
+            "id": new_user.id,
+            "name": new_user.full_name,
+            "email": new_user.email,
+            "role": new_user.role.value,
+            "department": getattr(new_user, "department", "General")
+        }
+    }
+
+
+@app.post("/api/auth/forgot-password")
+def forgot_password(req: ForgotPasswordRequest):
+    user = user_repo.get_by_email(req.email)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No registered user found with this corporate email address."
+        )
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is inactive or suspended. Cannot reset password."
+        )
+    is_strong, msg = User.validate_password_strength(req.new_password)
+    if not is_strong:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Weak Password Rejected: {msg}"
+        )
+    user.set_password(req.new_password)
+    user_repo.save(user)
+    return {
+        "status": "success",
+        "message": f"Password for {user.email} has been updated. You can now sign in."
+    }
 
 
 @app.get("/api/services")
@@ -378,5 +746,113 @@ def get_analytics():
 
 
 @app.get("/api/notifications")
-def get_notifications():
-    return incident_service.notification_observer.dispatched_notifications
+def get_notifications(recipient: Optional[str] = None):
+    try:
+        from backend.app.infrastructure.email.smtp_service import EmailService
+        svc = EmailService()
+        emails = svc.get_all(recipient)
+        smtp_configured = svc.smtp_configured
+    except Exception:
+        emails = []
+        smtp_configured = False
+    return {
+        "emails": emails,
+        "smtp_configured": smtp_configured,
+        "observer_dispatches": incident_service.notification_observer.dispatched_notifications
+    }
+
+
+@app.post("/api/notifications/test-email")
+def send_test_email(req: TestEmailRequest):
+    from backend.app.infrastructure.email.smtp_service import EmailService
+    svc = EmailService()
+    html = f"""
+    <div style='font-family:-apple-system,BlinkMacSystemFont,sans-serif;padding:24px;background:#0c0c0c;color:#f5f5f5;border:1px solid #262626;border-radius:12px;'>
+        <div style='border-bottom:1px solid #262626;padding-bottom:12px;margin-bottom:16px;'>
+            <span style='color:#f97316;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;'>I-ITSM Live Notification Test</span>
+            <h2 style='color:#ffffff;margin:6px 0 0 0;'>{req.subject}</h2>
+        </div>
+        <p style='font-size:14px;color:#d4d4d4;line-height:1.6;'>{req.message}</p>
+        <div style='background:#171717;border:1px solid #262626;border-radius:8px;padding:12px;margin-top:16px;font-size:12px;color:#a3a3a3;'>
+            <div>Recipient: <strong style='color:#ffffff;'>{req.to_email}</strong></div>
+            <div>Timestamp: <strong style='color:#f97316;'>{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}</strong></div>
+        </div>
+    </div>
+    """
+    res = svc.send_email([req.to_email], req.subject, html, req.message, "TEST_EMAIL")
+    return {
+        "status": "success",
+        "notification": res.to_dict(),
+        "delivery_status": res.status,
+        "smtp_configured": svc.smtp_configured,
+        "smtp_error": res.smtp_error
+    }
+
+
+@app.post("/api/incidents/{incident_id}/override-priority")
+def override_priority(incident_id: str, req: PriorityOverrideRequest):
+    inc = incident_repo.get_by_id(incident_id)
+    if not inc:
+        raise HTTPException(status_code=404, detail=f"Incident with ID '{incident_id}' not found.")
+    admin = user_repo.get_by_id(req.admin_id)
+    if not admin or admin.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Unauthorized: Only Administrators can manually override incident priority.")
+
+    old_p = inc.priority.value
+    inc.priority = req.new_priority
+    from backend.app.domain.models.sla_tracker import SLATracker
+    inc.sla_tracker = SLATracker(priority=req.new_priority)
+    inc.record_action(
+        actor=admin,
+        action="PRIORITY_OVERRIDDEN",
+        description=f"Priority manually overridden from {old_p} to {req.new_priority.value}. Reason: {req.reason}"
+    )
+    incident_repo.save(inc)
+    return {
+        "status": "success",
+        "message": f"Incident priority changed from {old_p} to {req.new_priority.value}.",
+        "new_priority": req.new_priority.value
+    }
+
+
+@app.get("/api/reports/executive-summary")
+def get_executive_summary():
+    analytics = incident_service.get_analytics_summary()
+    all_incidents = incident_repo.get_all()
+    all_services = service_repo.get_all()
+    all_techs = user_repo.get_technicians()
+
+    service_breakdown = []
+    for s in all_services:
+        s_incs = [i for i in all_incidents if i.service and i.service.id == s.id]
+        p1_count = sum(1 for i in s_incs if i.priority == Priority.P1)
+        breached_count = sum(1 for i in s_incs if getattr(i.sla_tracker, "is_breached", False))
+        service_breakdown.append({
+            "service_id": s.id,
+            "name": s.name,
+            "tier": s.tier.value,
+            "total_incidents": len(s_incs),
+            "critical_p1": p1_count,
+            "sla_breached": breached_count,
+            "availability_status": "DEGRADED" if p1_count > 0 else "OPERATIONAL"
+        })
+
+    tech_roster = []
+    for t in all_techs:
+        tech_roster.append({
+            "id": t.id,
+            "name": t.full_name,
+            "skills": getattr(t, "skills", []),
+            "current_load": t.current_active_load,
+            "max_load": t.max_active_load,
+            "utilization_pct": round((t.current_active_load / t.max_active_load * 100), 1) if t.max_active_load else 0
+        })
+
+    return {
+        "report_generated_at": datetime.now(timezone.utc).isoformat(),
+        "kpis": analytics,
+        "services": service_breakdown,
+        "technicians": tech_roster,
+        "total_incident_records": len(all_incidents)
+    }
+

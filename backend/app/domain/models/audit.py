@@ -28,10 +28,15 @@ class AuditRecord:
         self.timestamp = timestamp or datetime.now(timezone.utc)
 
     def to_dict(self) -> dict:
+        ts = self.timestamp
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        else:
+            ts = ts.astimezone(timezone.utc)
         return {
             "id": self.id,
             "incident_id": self.incident_id,
-            "timestamp": self.timestamp.isoformat(),
+            "timestamp": ts.isoformat(),
             "actor_id": self.actor_id,
             "actor_name": self.actor_name,
             "action": self.action,
