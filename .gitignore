@@ -12,4 +12,6 @@ frontend/dist/
 .DS_Store
 .env
 *.env
+DEMO_SCRIPT.md
+DEMO_SCRIPT.pdf
 
