@@ -14,6 +14,7 @@
 Modern enterprise infrastructures encompass hundreds of interconnected cloud instances, databases, authentication identity providers, payment processors, and storage networks. When failures emerge (e.g., database deadlocks, network timeouts, payment gateway disruptions), organizations suffer direct revenue loss, contractual SLA penalties, and customer churn. 
 
 Managing incidents manually or with ad-hoc ticketing systems introduces critical vulnerabilities:
+
 - **Delayed Response & Resolution Times:** Unstructured email or chat threads lead to missed notifications and prolonged diagnostic intervals.
 - **Arbitrary, Subjective Prioritization:** In the absence of mathematical prioritization matrices, users artificially mark non-critical issues as "P1-Critical," overwhelming support personnel while genuine infrastructure outages languish in triage.
 - **Workload Imbalances & Skill Mismatches:** Support leads manually assign tickets without visibility into individual technician skill sets or real-time cognitive workloads, leading to burnout and suboptimal resolution quality.
@@ -21,12 +22,14 @@ Managing incidents manually or with ad-hoc ticketing systems introduces critical
 - **Lack of Immutable Audit Tracking:** Regulatory compliance standards (ISO/IEC 20000, SOC-2, ITIL 4) mandate tamper-evident audit trails recording every actor, action, timestamp, and state delta—requirements unfulfilled by rudimentary ticketing databases.
 
 ### 1.2 Stakeholders
+
 1. **Employees / Service Consumers:** Report service disruptions, track real-time resolution status and countdown SLAs, provide additional diagnostic info, rate service quality, and verify or reopen resolved tickets.
 2. **Technicians / Support Engineers:** Triage incoming incidents aligned with their verified skill proficiencies, manage balanced workloads, request diagnostic details, leverage historical AI runbooks, and document permanent resolutions.
 3. **IT Administrators / Service Owners:** Configure dynamic service catalogs, establish SLA thresholds, toggle technician assignment strategies, monitor system topology graphs, trigger automatic escalation daemons, and review audit history.
 
 ### 1.3 Proposed Solution: I-ITSM
 I-ITSM is an enterprise-grade, object-oriented incident management platform engineered strictly around formal software design patterns and Clean Architecture:
+
 - **Encapsulated State Machine (State Pattern):** An 8-state transition lifecycle preventing invalid operations and enforcing strict lifecycle progression.
 - **Interchangeable Routing & Prioritization (Strategy Pattern):** Dynamic technician assignment algorithms (Skill-Based, Least-Loaded, Round-Robin, Composite Smart) and dual priority calculation engines (ITIL Risk Matrix and Mathematical Weighted Criticality).
 - **Event-Driven Auditing & Dual Channel Notifications (Observer Pattern):** Decoupled observers logging append-only audit records and dispatching concurrent real SMTP emails and visible in-app notification alerts.
@@ -34,6 +37,7 @@ I-ITSM is an enterprise-grade, object-oriented incident management platform engi
 
 ### 1.4 Campus CCIT & Maintenance Division Adoption Alignment
 The architecture of I-ITSM is specifically aligned with campus-wide IT infrastructure (such as BITS Pilani CCIT and General Administration Division):
+
 - **Hostel Wi-Fi & LAN Services:** TIER-2 service catalog entry mapping to network engineering technicians; auto-categorizes Wi-Fi drops and router authentication timeouts.
 - **Student ERP / LMS Portals:** TIER-1 critical services subject to 5-minute response SLAs during academic registration periods; auto-escalates to IT Managers on failure.
 - **Mess & Campus Dining Payment Bridges:** TIER-1 critical services connected via dependency topology to the Core Database cluster; triggers instant duplicate correlation across hostel dining facilities.
@@ -42,6 +46,7 @@ The architecture of I-ITSM is specifically aligned with campus-wide IT infrastru
 The dynamic runtime configuration allows campus network administrators to introduce new hostel clusters or adjust exam-week SLA policies on the fly with zero service restarts.
 
 ### 1.5 System Assumptions
+
 1. **Timezone Normalization:** All domain timestamps, deadlines, and audit entries are generated and recorded in Universal Time Coordinated (UTC). Presentation layers format timestamps according to the user's localized ISO-8601 browser context.
 2. **Dual-Mode Email & Outbox Delivery:** The system attempts real TLS/SMTP delivery when environment credentials (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASSWORD`) are present; if unconfigured, it gracefully falls back to the persistent Enterprise Outbox without interrupting execution.
 3. **Technician Workload Bounds:** Default technician active capacity is set to 5 concurrent active tickets (configurable per technician up to `max_active_load`). Overloaded technicians are automatically bypassed with `TechnicianCapacityExceededException`.
@@ -53,13 +58,14 @@ The dynamic runtime configuration allows campus network administrators to introd
 ## 2. Requirements Specification
 
 ### 2.1 Functional Requirements
+
 - **FR-01 (User Management & Authentication):** Role-based access control supporting `Employee`, `Technician`, and `Administrator`. Registration enforces a mandatory 5-point password complexity policy and 2-factor email OTP verification.
 - **FR-02 (Incident Reporting & NLP Auto-Categorization):** Creation of incident tickets with affected service, impact, urgency, and description. Automated NLP token extraction infers the category when unspecified.
-- **FR-03 (8-State Machine Lifecycle):** Strict sequence of transitions: `NEW` $\to$ `CLASSIFIED` $\to$ `ASSIGNED` $\to$ `ACKNOWLEDGED` $\to$ `IN_PROGRESS` $\to$ `RESOLVED` $\to$ `VERIFIED` $\to$ `CLOSED`. Support for customer resolution rejection (reopening ticket back to `IN_PROGRESS`).
+- **FR-03 (8-State Machine Lifecycle):** Strict sequence of transitions: `NEW` → `CLASSIFIED` → `ASSIGNED` → `ACKNOWLEDGED` → `IN_PROGRESS` → `RESOLVED` → `VERIFIED` → `CLOSED`. Support for customer resolution rejection (reopening ticket back to `IN_PROGRESS`).
 - **FR-04 (Dual Priority Engines):** Support for standard ITIL 4x4 Risk Matrix Strategy as well as a Mathematical Weighted Criticality Strategy balancing impact, urgency, and service tier.
 - **FR-05 (Dynamic Technician Assignment):** Four interchangeable assignment strategies: `SkillBasedAssignment`, `LeastLoadedAssignment`, `RoundRobinAssignment`, and `CompositeSmartAssignment`.
-- **FR-06 (Real-Time SLA Engine & Escalation Daemon):** Calculation of response and resolution deadlines per priority tier. Predictive warning flags at $>70\%$ elapsed time and automated 3-tier escalation on unacknowledged response breach.
-- **FR-07 (Intelligent Duplicate Detection):** NLP text vectorization combining TF-IDF cosine similarity, Jaccard token overlap, and service context boosts to flag related active disruptions (threshold $>0.35$).
+- **FR-06 (Real-Time SLA Engine & Escalation Daemon):** Calculation of response and resolution deadlines per priority tier. Predictive warning flags at >70% elapsed time and automated 3-tier escalation on unacknowledged response breach.
+- **FR-07 (Intelligent Duplicate Detection):** NLP text vectorization combining TF-IDF cosine similarity, Jaccard token overlap, and service context boosts to flag related active disruptions (threshold >0.35).
 - **FR-08 (Two Distinct Notification Channels):** Channel 1: Multi-part HTML/Text Email delivery via real SMTP with persistent outbox fallback. Channel 2: Live In-App Notification Center with unread tracking and badge counters.
 - **FR-09 (Multi-Criteria Search & Filter):** Support for at least 5 distinct search/filter criteria in the UI (Search text, Status, Priority, Category, Affected Service).
 - **FR-10 (Role-Specific Collaboration Loops):** Technicians can view real-time workload capacity and request additional diagnostic information; Employees can respond to info requests and provide 1–5 star post-resolution feedback.
@@ -70,6 +76,7 @@ The dynamic runtime configuration allows campus network administrators to introd
 - **FR-15 (Executive Reporting & PDF Export):** Real-time analytics dashboard with tabular breakdowns and browser print/PDF export capabilities.
 
 ### 2.2 User Roles & Personas
+
 | Role | Target Persona | Primary Responsibilities & Permissions |
 | :--- | :--- | :--- |
 | **Employee** | Alice Chen (Finance Associate) | Reports service disruptions, monitors live countdown SLAs, responds to technician diagnostic requests, rates resolution satisfaction (1–5 stars), and confirms or reopens resolved tickets. |
@@ -77,24 +84,35 @@ The dynamic runtime configuration allows campus network administrators to introd
 | **Administrator**| Sarah Connor (IT Director) | Manages service catalog and dependency trees, configures SLA policies, switches assignment strategies, triggers escalation daemons, overrides incident priorities with audit justification, and monitors system health. |
 
 ### 2.3 Business Rules & Operational Governance
+
 1. **SLA Response & Resolution Standards:**
-   - **P1 (Critical):** Response target $\le 5$ minutes; Resolution target $\le 30$ minutes.
-   - **P2 (High):** Response target $\le 15$ minutes; Resolution target $\le 120$ minutes (2 hours).
-   - **P3 (Medium):** Response target $\le 60$ minutes (1 hour); Resolution target $\le 480$ minutes (8 hours).
-   - **P4 (Low):** Response target $\le 240$ minutes (4 hours); Resolution target $\le 1440$ minutes (24 hours).
+
+   - **P1 (Critical):** Response target ≤ 5 minutes; Resolution target ≤ 30 minutes.
+   - **P2 (High):** Response target ≤ 15 minutes; Resolution target ≤ 120 minutes (2 hours).
+   - **P3 (Medium):** Response target ≤ 60 minutes (1 hour); Resolution target ≤ 480 minutes (8 hours).
+   - **P4 (Low):** Response target ≤ 240 minutes (4 hours); Resolution target ≤ 1440 minutes (24 hours).
+
 2. **Automated Hierarchical Escalation:**
+
    - If a P1 incident remains unacknowledged past its response deadline, it automatically escalates to the **IT Manager (Level 4)**.
    - If a P2/P3/P4 incident breaches its response deadline, it escalates to the **Team Lead (Level 2)**.
-   - If any incident consumes $>85\%$ of its resolution SLA without resolution, a critical warning dispatches to the **System Administrator (Level 3)**.
+   - If any incident consumes >85% of its resolution SLA without resolution, a critical warning dispatches to the **System Administrator (Level 3)**.
+
 3. **Technician Capacity Ceiling:**
+
    - Technicians cannot be assigned tickets if `current_active_load >= max_active_load` (default 5). The assignment engine rejects over-capacity assignments with `TechnicianCapacityExceededException`.
+
 4. **Resolution Verification & Reopening Protocol:**
+
    - Only the original reporting employee or an administrator may verify or close a resolved ticket.
    - If the employee confirms the resolution, the ticket transitions to `VERIFIED` and then `CLOSED`. If rejected, the state returns to `IN_PROGRESS`, the `reopen_count` increments, and the technician is re-alerted.
+
 5. **Priority Override Accountability:**
+
    - Priority manual overrides are restricted to administrators and mandate an explicit written justification stored in the immutable audit trail.
 
 ### 2.4 Non-Functional Requirements
+
 - **NFR-01 (Extensibility & Open/Closed Principle):** Introducing new categories, SLA tiers, or assignment algorithms requires zero modifications to existing domain entities.
 - **NFR-02 (Robustness & Fault Tolerance):** Custom domain exceptions catch and isolate invalid transitions, workload overflows, and network timeouts without server crashes or unhandled 500 errors.
 - **NFR-03 (Maintainability & Clean Architecture):** Strict boundary separation between Presentation (React), Application (FastAPI), Domain (OOP Models), and Persistence (SQLAlchemy Repository).
@@ -120,27 +138,32 @@ M    Medium   |    P2    |   P3   |   P3    |  P4   |
 P    Low      |    P3    |   P3   |   P4    |  P4   |
               +----------+--------+---------+-------+
 ```
+
 * **Tier-1 Override Rule:** If `service.tier == TIER_1_CRITICAL` and `impact >= HIGH`, the priority automatically elevates to **P1 (Critical)** regardless of user urgency, ensuring enterprise services (e.g., Core DB, Payment Gateway) receive immediate SLA containment.
 
 ### 3.2 Mathematical Weighted Criticality Strategy (`WeightedCriticalityStrategy`)
 For quantitative multi-factor environments, the system implements a continuous scoring formula:
 
-$$\text{Priority Score} = (\text{ImpactWeight} \times 0.40) + (\text{UrgencyWeight} \times 0.30) + (\text{BusinessCriticalityMultiplier} \times 2.5 \times 0.30)$$
+```text
+Priority Score = (Impact Weight × 0.40) + (Urgency Weight × 0.30) + (Business Criticality × 2.5 × 0.30)
+```
 
 #### Component Scoring Weights:
-- **Impact Weights ($I$):** $\text{Low} = 1.0$, $\text{Medium} = 2.0$, $\text{High} = 3.0$, $\text{Critical} = 4.0$.
-- **Urgency Weights ($U$):** $\text{Low} = 1.0$, $\text{Medium} = 2.0$, $\text{High} = 3.0$, $\text{Critical} = 4.0$.
-- **Business Criticality Multiplier ($C$):** $\text{Tier 1 Critical} = 1.5$, $\text{Tier 2 Standard} = 1.0$, $\text{Tier 3 Internal} = 0.7$.
+
+- **Impact Weights (I):** Low = 1.0, Medium = 2.0, High = 3.0, Critical = 4.0
+- **Urgency Weights (U):** Low = 1.0, Medium = 2.0, High = 3.0, Critical = 4.0
+- **Business Criticality Multiplier (C):** Tier 1 Critical = 1.5, Tier 2 Standard = 1.0, Tier 3 Internal = 0.7
 
 #### Score Classification Thresholds:
-$$\text{Priority} = \begin{cases} 
-\mathbf{P1\ (Critical)}, & \text{Score} \ge 3.3 \\ 
-\mathbf{P2\ (High)}, & 2.5 \le \text{Score} < 3.3 \\ 
-\mathbf{P3\ (Medium)}, & 1.8 \le \text{Score} < 2.5 \\ 
-\mathbf{P4\ (Low)}, & \text{Score} < 1.8 
-\end{cases}$$
+```text
+• P1 (Critical): Score >= 3.3
+• P2 (High):     2.5 <= Score < 3.3
+• P3 (Medium):   1.8 <= Score < 2.5
+• P4 (Low):      Score < 1.8
+```
 
 #### Architectural Rationale:
+
 1. **Impact Dominance (40%):** Outages affecting thousands of users (e.g., campus ERP) must objectively outweigh single-user edge cases even if the single user marks their issue as urgent.
 2. **Organizational Asset Weighting (30%):** By incorporating service tiering into the mathematical formulation, failures on critical infrastructure receive systematic priority over peripheral internal tools.
 3. **Urgency Influence (30%):** Guarantees that time-sensitive business events (e.g., semester grade submission deadlines, payroll runs) can elevate an incident from P3 to P2.
@@ -150,19 +173,21 @@ $$\text{Priority} = \begin{cases}
 ## 4. Technology Selection Report (Faculty 9-Question Evaluation)
 
 ### 4.1 Evaluation Questions & Architectural Justifications
+
 | # | Faculty Evaluation Question | Architectural Justification |
 | :--- | :--- | :--- |
 | **1** | **Why this programming language?** | Python 3.13 was selected for its mature, first-class OOP support (Abstract Base Classes `abc`, strong typing protocols, and multiple inheritance) combined with native scientific NLP libraries (`scikit-learn`, `numpy`) required for intelligent duplicate incident detection and text vectorization. |
 | **2** | **Why this frontend technology?** | React 19 + TypeScript + Vite. TypeScript enforces compile-time type safety mirroring backend domain models. Vite provides lightning-fast Hot Module Replacement (HMR) and sub-200ms production builds. Custom Glassmorphic Vanilla CSS delivers an executive-grade user experience with zero external CSS runtime overhead. |
 | **3** | **Why this backend technology?** | FastAPI. Delivers high-throughput asynchronous execution, automatic OpenAPI/Swagger interactive documentation, native Pydantic validation, and clean dependency injection that seamlessly implements the Repository Pattern. |
 | **4** | **Why this database?** | SQLite (via SQLAlchemy 2.0 ORM). Provides zero-configuration ACID compliance, relational foreign-key integrity, and persistent disk storage across restarts, while maintaining an ORM abstraction that transitions to enterprise PostgreSQL simply by modifying the database connection URI. |
-| **5** | **Why this architecture?** | Layered Clean Architecture (Domain $\to$ Application $\to$ Infrastructure $\to$ Presentation). Domain models contain pure business logic with zero framework dependencies, ensuring 100% unit-testability without spinning up web servers or live databases. |
+| **5** | **Why this architecture?** | Layered Clean Architecture (Domain → Application → Infrastructure → Presentation). Domain models contain pure business logic with zero framework dependencies, ensuring 100% unit-testability without spinning up web servers or live databases. |
 | **6** | **What alternatives were considered?** | Considered Java Spring Boot and Django. Spring Boot was rejected due to heavy XML/annotation boilerplate that obscures design pattern mechanics; Django was rejected due to its tightly coupled Active-Record ORM, which violates Domain-Driven Design (DDD) separation of concerns. |
 | **7** | **Advantages and limitations?** | **Advantages:** Clean demonstration of GoF OOP patterns, sub-second test execution, native machine learning for duplicate detection without external microservices. **Limitations:** Single-node SQLite concurrency limits under heavy write traffic (mitigated by switching the SQLAlchemy connection string to distributed PostgreSQL). |
-| **8** | **How does the stack support OOP?** | Encapsulation via private attributes (`_id`, `_hashed_password`), Inheritance across User hierarchies (`User` $\to$ `Employee`, `Technician`, `Administrator`), Polymorphism across Strategy interfaces (`IAssignmentStrategy`, `IPriorityStrategy`), and pure behavioral modeling via the State Pattern (`IncidentState`). |
+| **8** | **How does the stack support OOP?** | Encapsulation via private attributes (`_id`, `_hashed_password`), Inheritance across User hierarchies (`User` → `Employee`, `Technician`, `Administrator`), Polymorphism across Strategy interfaces (`IAssignmentStrategy`, `IPriorityStrategy`), and pure behavioral modeling via the State Pattern (`IncidentState`). |
 | **9** | **How will the system evolve at scale?** | The decoupled Repository interfaces (`IIncidentRepository`) allow instantaneous migration to distributed PostgreSQL / CockroachDB; background SLA tasks can transition to Celery / Redis message brokers; the frontend is statically deployable via edge CDNs. |
 
 ### 4.2 Consolidated Technology Stack & Library Inventory
+
 | Category | Technology / Library | Version | Purpose & Architectural Role |
 | :--- | :--- | :--- | :--- |
 | **Backend Core** | Python | 3.13.9 | Core object-oriented programming language |
@@ -188,6 +213,14 @@ $$\text{Priority} = \begin{cases}
 ## 5. System Architecture & UML Diagrams
 
 ### 5.1 System Architecture Diagram
+
+<div align="center" style="margin: 20px 0; page-break-inside: avoid; break-inside: avoid;">
+  <img src="docs/diagrams/system_architecture.svg" alt="System Architecture Diagram" style="max-width: 100%; max-height: 85vh; object-fit: contain;" />
+</div>
+
+<details>
+<summary>Click to view Mermaid 10.9.8 Source Code</summary>
+
 ```mermaid
 graph TD
     UI[Frontend: React 19 + TypeScript + Glassmorphism UI]
@@ -237,10 +270,19 @@ graph TD
     REPO_USR --> SQL
     REPO_SRV --> SQL
 ```
+</details>
 
 ---
 
 ### 5.2 Comprehensive UML Use Case Diagram
+
+<div align="center" style="margin: 20px 0; page-break-inside: avoid; break-inside: avoid;">
+  <img src="docs/diagrams/use_case_diagram.svg" alt="Comprehensive UML Use Case Diagram" style="max-width: 100%; max-height: 85vh; object-fit: contain;" />
+</div>
+
+<details>
+<summary>Click to view Mermaid 10.9.8 Source Code</summary>
+
 ```mermaid
 flowchart LR
     Employee((Employee))
@@ -292,10 +334,19 @@ flowchart LR
     Admin --> UC_ANALYTICS
     Admin --> UC_SEARCH
 ```
+</details>
 
 ---
 
 ### 5.3 Detailed UML Class Diagram (Domain Models & GoF Patterns)
+
+<div align="center" style="margin: 20px 0; page-break-inside: avoid; break-inside: avoid;">
+  <img src="docs/diagrams/class_diagram.svg" alt="Detailed UML Class Diagram" style="max-width: 100%; max-height: 85vh; object-fit: contain;" />
+</div>
+
+<details>
+<summary>Click to view Mermaid 10.9.8 Source Code</summary>
+
 ```mermaid
 classDiagram
     class User {
@@ -305,11 +356,11 @@ classDiagram
         -UserRole _role
         -String _hashed_password
         -bool _is_active
-        +id: String
-        +email: String
-        +fullName: String
-        +role: UserRole
-        +isActive: bool
+        +String id
+        +String email
+        +String fullName
+        +UserRole role
+        +bool isActive
         +hashPassword(String) String
         +validatePasswordStrength(String) Tuple
         +verifyPassword(String) bool
@@ -374,7 +425,7 @@ classDiagram
 
     class IncidentState {
         <<Abstract>>
-        +status: IncidentStatus
+        +IncidentStatus status
         +classify(Incident, String, User) void
         +assign(Incident, Technician, User) void
         +acknowledge(Incident, User) void
@@ -471,7 +522,7 @@ classDiagram
         +SLAPolicy slaPolicy
         +List~String~ dependencies
         +bool isActive
-        +criticalityMultiplier: float
+        +float criticalityMultiplier
         +addDependency(String) void
     }
 
@@ -507,7 +558,7 @@ classDiagram
         <<Interface>>
         +save(Incident) Incident
         +getById(String) Incident
-        +getAll(...) List~Incident~
+        +getAll() List~Incident~
         +count() int
     }
     class SqliteIncidentRepository
@@ -544,10 +595,18 @@ classDiagram
     DomainException <|-- NetworkFailureException
     DomainException <|-- InvalidUserInputException
 ```
+</details>
 
 ---
 
 ### 5.4 Entity-Relationship (ER) Diagram & Schema Specifications
+
+<div align="center" style="margin: 20px 0; page-break-inside: avoid; break-inside: avoid;">
+  <img src="docs/diagrams/er_diagram.svg" alt="Entity-Relationship Diagram" style="max-width: 100%; max-height: 85vh; object-fit: contain;" />
+</div>
+
+<details>
+<summary>Click to view Mermaid 10.9.8 Source Code</summary>
 
 ```mermaid
 erDiagram
@@ -644,6 +703,7 @@ erDiagram
         datetime created_at
     }
 ```
+</details>
 
 #### 5.4.1 Relational Database Schema (DDL)
 ```sql
@@ -743,6 +803,7 @@ CREATE TABLE in_app_notifications (
 
 #### 5.4.2 Representative Sample Data
 **Table: `users`**
+
 | id | email | full_name | role | department | skills | max_load | current_load | is_available |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `usr-emp-01` | `alice.chen@enterprise.io` | Alice Chen | `EMPLOYEE` | Finance | `[]` | 5 | 0 | 1 |
@@ -751,6 +812,7 @@ CREATE TABLE in_app_notifications (
 | `usr-adm-01` | `sarah.connor@enterprise.io`| Sarah Connor | `ADMIN` | IT Governance | `["governance","management"]` | 10 | 0 | 1 |
 
 **Table: `services`**
+
 | id | name | description | tier | dependencies | is_active |
 | :--- | :--- | :--- | :--- | :--- | :--- |
 | `srv-db` | Core Database Cluster | High-availability PostgreSQL cluster | `TIER_1_CRITICAL` | `[]` | 1 |
@@ -759,6 +821,7 @@ CREATE TABLE in_app_notifications (
 | `srv-mail`| Internal Mail Relay | Postfix & Exchange SMTP gateway | `TIER_3` | `["srv-db"]` | 1 |
 
 **Table: `incidents`**
+
 | id | title | category | service_id | reporter_id | assigned_id | priority | current_state | is_breached |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
 | `inc-8910` | Payment API Deadlock | Payment | `srv-pay` | `usr-emp-01` | `usr-tech-01` | `P1` | `IN_PROGRESS` | 0 |
@@ -766,11 +829,12 @@ CREATE TABLE in_app_notifications (
 | `inc-8912` | Invoice PDF Export Error| Database | `srv-db` | `usr-emp-01` | `usr-tech-01` | `P3` | `VERIFIED` | 0 |
 
 #### 5.4.3 Important Relational Integrity & Foreign Keys (Deliverable 7)
-- **`incidents.reporter_id` $\to$ `users.id`:** Mandatory foreign key linking ticket creation to a verified enterprise user identity.
-- **`incidents.assigned_technician_id` $\to$ `users.id`:** Nullable foreign key populated upon assignment; restricted to users possessing the `TECHNICIAN` role.
-- **`incidents.service_id` $\to$ `services.id`:** Mandatory reference binding each incident to an active business or infrastructure catalog service.
-- **`audit_records.incident_id` $\to$ `incidents.id`:** High-integrity relationship supporting append-only logging; audit entries are immutable and never deleted.
-- **`in_app_notifications.user_id` $\to$ `users.id`:** Direct relationship driving the visible bell notification center for each target user.
+
+- **`incidents.reporter_id` → `users.id`:** Mandatory foreign key linking ticket creation to a verified enterprise user identity.
+- **`incidents.assigned_technician_id` → `users.id`:** Nullable foreign key populated upon assignment; restricted to users possessing the `TECHNICIAN` role.
+- **`incidents.service_id` → `services.id`:** Mandatory reference binding each incident to an active business or infrastructure catalog service.
+- **`audit_records.incident_id` → `incidents.id`:** High-integrity relationship supporting append-only logging; audit entries are immutable and never deleted.
+- **`in_app_notifications.user_id` → `users.id`:** Direct relationship driving the visible bell notification center for each target user.
 - **`services.dependencies` Self-Referential Graph:** JSON-encoded list of service foreign keys forming a Directed Acyclic Graph (DAG) used for cascade failure computation.
 
 ---
@@ -782,29 +846,32 @@ The system enforces the principle of least privilege across both the API gateway
 
 | Operation / Capability | Employee | Technician | Administrator | Enforcing Layer |
 | :--- | :---: | :---: | :---: | :--- |
-| Report New Incident Ticket | ✅ | ✅ | ✅ | `IncidentService.report_incident` |
-| View Assigned / Reported Tickets | ✅ (Self) | ✅ (All/Assigned) | ✅ (All) | SQL Repository Filters |
-| Request Additional Diagnostic Info | ❌ | ✅ | ✅ | `Incident.request_info` |
-| Provide Additional Info / Response | ✅ | ❌ | ❌ | `Incident.add_info` |
-| Acknowledge Ticket & Start Triage | ❌ | ✅ | ✅ | `IncidentState.acknowledge` |
-| Document & Submit Resolution | ❌ | ✅ | ✅ | `IncidentState.resolve` |
-| Confirm Resolution / Reopen Ticket | ✅ (Reporter) | ❌ | ✅ | `IncidentState.verify` |
-| Override Incident Priority & SLA | ❌ | ❌ | ✅ | `IncidentService.override_priority` |
-| Modify IT Service Catalog & Tiers | ❌ | ❌ | ✅ | `AdminService.update_service` |
-| Switch Active Assignment Strategy | ❌ | ❌ | ✅ | `AdminService.set_strategy` |
-| Configure Dynamic SLA Thresholds | ❌ | ❌ | ✅ | `AdminService.update_sla_policy` |
+| Report New Incident Ticket | Yes | Yes | Yes | `IncidentService.report_incident` |
+| View Assigned / Reported Tickets | Yes (Self) | Yes (All/Assigned) | Yes (All) | SQL Repository Filters |
+| Request Additional Diagnostic Info | No | Yes | Yes | `Incident.request_info` |
+| Provide Additional Info / Response | Yes | No | No | `Incident.add_info` |
+| Acknowledge Ticket & Start Triage | No | Yes | Yes | `IncidentState.acknowledge` |
+| Document & Submit Resolution | No | Yes | Yes | `IncidentState.resolve` |
+| Confirm Resolution / Reopen Ticket | Yes (Reporter) | No | Yes | `IncidentState.verify` |
+| Override Incident Priority & SLA | No | No | Yes | `IncidentService.override_priority` |
+| Modify IT Service Catalog & Tiers | No | No | Yes | `AdminService.update_service` |
+| Switch Active Assignment Strategy | No | No | Yes | `AdminService.set_strategy` |
+| Configure Dynamic SLA Thresholds | No | No | Yes | `AdminService.update_sla_policy` |
 
 #### 5.5.2 Cryptographic Password Protection & Complexity Enforcement
+
 - **Hashing Algorithm:** Passwords are never stored in plaintext. They are salted and cryptographically hashed using PBKDF2 with SHA-256 (`hashlib.sha256`).
 - **5-Point Complexity Verification:** Registration and password resets enforce a strict 5-point complexity rule:
+
   1. Minimum length of 8 characters.
   2. At least one uppercase Latin character (`[A-Z]`).
   3. At least one lowercase Latin character (`[a-z]`).
   4. At least one numeric digit (`[0-9]`).
-  5. At least one special symbol (`[!@#$%^&*(),.?":{}|<>\-_+=\[\]\\;'/~]`).
+  5. At least one special symbol such as ! @ # $ % ^ & * ( ) _ + - = [ ] { } | : ; " ' ? . / ~
 
 #### 5.5.3 Two-Factor Email OTP Verification Lifecycle
 To prevent fraudulent account registration and ensure authenticated communication:
+
 1. Registration inputs are validated; a cryptographically random 6-digit numeric OTP is generated.
 2. The code is cached with a 10-minute Time-To-Live (TTL).
 3. The OTP is dispatched via real SMTP TLS (with fallback to the secured outbox).
@@ -814,6 +881,7 @@ To prevent fraudulent account registration and ensure authenticated communicatio
 All database interactions in `SqliteIncidentRepository` execute strictly via SQLAlchemy 2.0 type-safe parameterized expressions. Raw string formatting (`f"SELECT ... {input}"`) is strictly prohibited, providing guaranteed immunity against SQL injection across all dynamic search filters.
 
 #### 5.5.5 Zero-Trust Secret Isolation & Git Hygiene
+
 - **Secret Isolation:** Production SMTP host, port, user credentials, and application secrets load exclusively from `os.environ` at runtime.
 - **Git Shielding:** `.gitignore` explicitly excludes `.env`, `*.env`, `backend/venv/`, and `.pytest_cache/`. No production credentials reside within git history or tracked repository files.
 
@@ -826,19 +894,25 @@ I-ITSM introduces five advanced computer science innovations directly fulfilling
 ### 6.1 Intelligent Duplicate Incident Detection Engine
 When high-impact disruptions emerge, multiple employees submit overlapping tickets. To prevent fragmented triage, the platform executes an intelligent duplicate detection engine combining TF-IDF vectorization, Cosine Similarity, and Jaccard token overlap:
 
-$$\text{sim}_{\text{cosine}}(d_1, d_2) = \frac{\mathbf{v}_1 \cdot \mathbf{v}_2}{\|\mathbf{v}_1\|_2 \|\mathbf{v}_2\|_2} = \frac{\sum_{i=1}^n w_{i,1} w_{i,2}}{\sqrt{\sum_{i=1}^n w_{i,1}^2} \sqrt{\sum_{i=1}^n w_{i,2}^2}}$$
+```text
+Cosine Semantic Similarity:
+sim_cosine(d1, d2) = (v1 · v2) / (||v1||₂ × ||v2||₂) = ∑(w_i,1 × w_i,2) / (√∑w_i,1² × √∑w_i,2²)
 
-$$\text{Jaccard}(T_1, T_2) = \frac{|T_1 \cap T_2|}{|T_1 \cup T_2|}$$
+Jaccard Token Overlap:
+Jaccard(T1, T2) = |T1 ∩ T2| / |T1 ∪ T2|
 
-$$\text{Score}_{\text{composite}} = (0.60 \times \text{sim}_{\text{cosine}}) + (0.40 \times \text{Jaccard})$$
+Composite Correlation Score:
+Score_composite = (0.60 × sim_cosine) + (0.40 × Jaccard)
+```
 
 - **Contextual Domain Boosts:**
-  - If both tickets share the same affected service ID: $\text{Score} \leftarrow \min(1.0, \text{Score} \times 1.30)$ ($+30\%$ boost).
-  - If both tickets share the same category: $\text{Score} \leftarrow \min(1.0, \text{Score} \times 1.10)$ ($+10\%$ boost).
-- **Threshold Policy:** Any active ticket with $\text{Score}_{\text{composite}} \ge 0.35$ is correlated; the reporting UI highlights a real-time duplicate warning banner allowing the user to link their report to the parent ticket.
+  - If both tickets share the same affected service ID: `Score = min(1.0, Score × 1.30)` (+30% boost).
+  - If both tickets share the same category: `Score = min(1.0, Score × 1.10)` (+10% boost).
+- **Threshold Policy:** Any active ticket with `Score_composite >= 0.35` is correlated; the reporting UI highlights a real-time duplicate warning banner allowing the user to link their report to the parent ticket.
 
 ### 6.2 Automated NLP Category Inference
 Users frequently select incorrect technical categories. The `IntelligentCategorizer` module extracts n-grams from the ticket title and description, matching tokens against specialized domain dictionaries:
+
 - `Database`: `postgres`, `mysql`, `sql`, `deadlock`, `query`, `table`, `disk`, `io`, `storage`
 - `Network`: `vpn`, `dns`, `gateway`, `latency`, `ping`, `timeout`, `packet`, `router`, `wifi`
 - `Payment`: `stripe`, `paypal`, `transaction`, `checkout`, `credit`, `card`, `refund`, `invoice`
@@ -849,27 +923,33 @@ When no category is manually selected, the category with the highest token score
 
 ### 6.3 Dual Suggested Resolution Recommender
 Technicians resolving complex disruptions benefit from historical institutional knowledge and curated standard operating procedures:
-1. **Historical Knowledge Base Matching:** Vectorizes all historically resolved and verified tickets using TF-IDF. When a new ticket is inspected, it computes cosine similarity against resolved incident descriptions; matching tickets ($>0.30$) return the exact verified diagnostic steps and terminal commands previously documented.
+
+1. **Historical Knowledge Base Matching:** Vectorizes all historically resolved and verified tickets using TF-IDF. When a new ticket is inspected, it computes cosine similarity against resolved incident descriptions; matching tickets (>0.30) return the exact verified diagnostic steps and terminal commands previously documented.
 2. **Enterprise SRE Runbooks:** An offline expert system provides domain-curated step-by-step remediation procedures for database connection pool exhaustion, webhook idempotency resets, and SAML signing certificate rotation.
 3. **Generative AI SRE Synthesis:** If a Google Gemini API key is configured in the environment, the engine synthesizes custom remediation runbooks tailored to the exact failure symptoms.
 
 ### 6.4 Service Dependency Topology Graph & Cascade Failure Propagation
-Enterprise IT services rarely operate in isolation. The system models services as a Directed Acyclic Graph (DAG) $G = (V, E)$, where vertices $V$ represent IT services and directed edges $E = \{(u, v)\}$ represent dependency relationships ("Service $u$ depends on Service $v$"):
+Enterprise IT services rarely operate in isolation. The system models services as a Directed Acyclic Graph (DAG) G = (V, E), where vertices V represent IT services and directed edges E = {(u, v)} represent dependency relationships ("Service u depends on Service v"):
+
 - **Breadth-First Health Evaluation:**
   - If a service has active P1 incidents: `Health = CRITICAL`.
   - If a service has active non-P1 incidents: `Health = DEGRADED`.
   - If a service has zero active incidents: `Health = OPERATIONAL`.
 - **Cascade Propagation Rule:** For any service $u$ evaluated as `OPERATIONAL`, if any upstream dependency $v \in \text{Dependencies}(u)$ has `Health == CRITICAL`, service $u$'s health is automatically overridden to **`IMPACTED`**:
-  $$\text{Health}(u) \leftarrow \mathbf{IMPACTED} \quad \text{if} \quad \exists v \in \text{Deps}(u) \text{ such that } \text{Health}(v) = \mathbf{CRITICAL}$$
+```text
+Health(u) ← IMPACTED   if   ∃ v ∈ Dependencies(u) such that Health(v) == CRITICAL
+```
 This enables support leads to immediately identify that payment failures are cascading symptoms of an underlying database crash, preventing duplicate triage effort.
 
 ### 6.5 Predictive SLA Risk Detection & Hierarchical Escalation Daemon
 Rather than reacting only after an SLA has been breached, the `SLATracker` continuously computes the elapsed resolution ratio:
 
-$$\text{Elapsed Ratio} = \frac{\text{CurrentTime} - \text{CreatedAt}}{\text{ResolutionDeadline} - \text{CreatedAt}}$$
+```text
+Elapsed Ratio = (CurrentTime - CreatedAt) / (ResolutionDeadline - CreatedAt)
+```
 
-- **Early Warning Trigger ($>70\%$):** If $\text{Elapsed Ratio} \ge 0.70$ and the ticket is still in progress, `is_resolution_at_risk` returns `True`. The UI displays an amber pulsing alert, and an in-app notification dispatches to the technician.
-- **Critical Risk Trigger ($>85\%$):** If $\text{Elapsed Ratio} \ge 0.85$, an urgent warning escalates to the **System Administrator (Level 3)**.
+- **Early Warning Trigger (>70%):** If `Elapsed Ratio >= 0.70` and the ticket is still in progress, `is_resolution_at_risk` returns `True`. The UI displays an amber pulsing alert, and an in-app notification dispatches to the technician.
+- **Critical Risk Trigger (>85%):** If `Elapsed Ratio >= 0.85`, an urgent warning escalates to the **System Administrator (Level 3)**.
 - **Unacknowledged Response Breach:** If `CurrentTime > ResponseDeadline` while still unacknowledged, the background daemon automatically elevates P1 tickets to the **IT Manager (Level 4)** and non-P1 tickets to the **Team Lead (Level 2)**, appending the escalation event to the immutable audit trail.
 
 ---
@@ -884,16 +964,16 @@ The comprehensive automated test suite achieves **100% test pass rate** across 2
 
 | Test ID | Test Category | Scenario Description | Expected Outcome | Actual Result |
 | :--- | :--- | :--- | :--- | :--- |
-| **TC-01** | State Pattern | Direct transition from `NEW` $\to$ `CLOSED` | Throws `InvalidStateTransitionException`; ticket remains `NEW`. | **PASS** |
+| **TC-01** | State Pattern | Direct transition from `NEW` → `CLOSED` | Throws `InvalidStateTransitionException`; ticket remains `NEW`. | **PASS** |
 | **TC-02** | State Pattern | Full valid 8-step lifecycle progression | All transitions pass sequentially; audit records appended. | **PASS** |
 | **TC-03** | Strategy Pattern | Impact=High, Urgency=High on Tier 1 Service | Evaluated to `P1 - Critical` priority via matrix strategy. | **PASS** |
 | **TC-04** | Strategy Pattern | Category="Database" with `SkillBasedAssignment` | Assigned to technician possessing `database` certification. | **PASS** |
 | **TC-05** | Strategy Pattern | Assignment with `LeastLoadedAssignment` | Assigned to technician with lowest active ticket count. | **PASS** |
 | **TC-06** | Exception Handling | Technician at maximum active capacity (5/5) | Throws `TechnicianCapacityExceededException`. | **PASS** |
 | **TC-07** | SLA Engine | Creation of P1 Incident | 5 min response deadline and 30 min resolution deadline calculated. | **PASS** |
-| **TC-08** | Intelligence | Incident elapsed resolution time $>70\%$ | Proactive warning flag (`is_resolution_at_risk`) returns `True`. | **PASS** |
+| **TC-08** | Intelligence | Incident elapsed resolution time >70% | Proactive warning flag (`is_resolution_at_risk`) returns `True`. | **PASS** |
 | **TC-09** | Escalation | P1 ticket unacknowledged past response deadline | Escalation engine elevates to `IT Manager`; audit record logged. | **PASS** |
-| **TC-10** | Intelligence | Two concurrent payments failing reports | Exceeds 0.35 duplicate threshold (scored $>0.40$ via NLP TF-IDF cosine similarity). | **PASS** |
+| **TC-10** | Intelligence | Two concurrent payments failing reports | Exceeds 0.35 duplicate threshold (scored >0.40 via NLP TF-IDF cosine similarity). | **PASS** |
 | **TC-11** | Observer Pattern | Ticket progresses across 2 state changes | Exactly 3 audit records logged chronologically (Report + 2 transitions).| **PASS** |
 | **TC-12** | Authorization | Employee attempts to acknowledge/resolve | Throws `UnauthorizedActionException`. | **PASS** |
 | **TC-13** | Observer Pattern | Ticket state change occurs | Dispatches notifications to reporter and technician. | **PASS** |
@@ -942,6 +1022,7 @@ This structured demonstration script guarantees complete coverage of all functio
 ## 10. Conclusion & Academic Defense Summary
 
 The **Intelligent IT Service Management & Incident Resolution System (I-ITSM)** successfully bridges rigorous object-oriented software engineering with enterprise ITIL service operations. By grounding its core architecture in formal GoF design patterns:
+
 1. **Maintainability:** The State Pattern encapsulates complex lifecycle progression into discrete state classes, eliminating fragile conditional branching.
 2. **Extensibility:** The Strategy and Factory Patterns allow system administrators to introduce new priority matrices, routing heuristics, and service tiers at runtime without code refactoring.
 3. **Auditability:** The Observer Pattern guarantees tamper-evident, append-only compliance logging alongside decoupled multi-channel alerting.
