@@ -240,6 +240,10 @@ class IncidentCreateRequest(BaseModel):
     auto_assign: bool = True
 
 
+class BatchDeleteRequest(BaseModel):
+    incident_ids: List[str]
+
+
 class AssignTechnicianRequest(BaseModel):
     actor_id: str
     technician_id: Optional[str] = None
@@ -859,6 +863,26 @@ def report_incident(req: IncidentCreateRequest):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+@app.delete("/api/incidents/{incident_id}")
+def delete_incident(incident_id: str):
+    success = incident_service.delete_incident(incident_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+    return {"message": f"Incident {incident_id} deleted successfully", "deleted": True}
+
+
+@app.post("/api/incidents/batch-delete")
+def batch_delete_incidents(req: BatchDeleteRequest):
+    res = incident_service.batch_delete_incidents(req.incident_ids)
+    return res
+
+
+@app.post("/api/incidents/cleanup-duplicates")
+def cleanup_duplicates():
+    res = incident_service.cleanup_duplicates()
+    return res
+
+
 @app.post("/api/incidents/{incident_id}/assign")
 def assign_technician(incident_id: str, req: AssignTechnicianRequest):
     try:
@@ -1008,6 +1032,22 @@ def send_test_email(req: TestEmailRequest):
         "smtp_configured": svc.smtp_configured,
         "smtp_error": res.smtp_error
     }
+
+
+@app.post("/api/notifications/clear-outbox")
+def clear_outbox():
+    """Clears all dispatched emails from the internal outbox repository."""
+    from backend.app.infrastructure.email.smtp_service import EmailService
+    count = EmailService().clear_outbox()
+    return {"cleared_count": count, "message": "Email outbox cleared successfully"}
+
+
+@app.post("/api/admin/reset-database")
+def reset_database():
+    """Resets database and clears outbox, reseeding with clean realistic dummy records."""
+    from backend.app.infrastructure.persistence.reseed import reset_and_seed_database
+    reset_and_seed_database("backend/itsm.db")
+    return {"message": "Database and outbox reset and reseeded with clean dummy records successfully"}
 
 
 @app.post("/api/incidents/{incident_id}/override-priority")

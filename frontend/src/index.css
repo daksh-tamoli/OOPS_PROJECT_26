@@ -341,12 +341,26 @@ code, pre {
 
 .auth-card {
   width: 100%;
-  max-width: 460px;
+  max-width: 560px;
   background: var(--bg-card);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-lg);
   padding: 32px;
   box-shadow: 0 10px 40px rgba(0, 0, 0, 0.7);
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.animate-spin {
+  animation: spin 1s linear infinite;
+}
+
+.hover-danger:hover {
+  color: #f43f5e !important;
+  background: rgba(244, 63, 94, 0.15) !important;
 }
 
 .auth-tab-btn {

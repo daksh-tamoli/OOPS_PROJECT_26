@@ -5,7 +5,7 @@ import {
   Layers, AlertCircle, FileEdit, Server, AlertTriangle,
   Lock, Mail, LogOut, ArrowRight, Printer, BarChart3, Send, Sliders,
   ShieldCheck, ArrowLeft, Network, Sparkles, Cpu, Bell, Settings, MessageSquare, Wrench,
-  CheckCircle, UserCheck, Info
+  CheckCircle, UserCheck, Info, Trash2
 } from 'lucide-react';
 
 
@@ -90,6 +90,20 @@ const formatServiceTier = (tier: string): string => {
   }
 };
 
+const DUMMY_DEMO_USERS = [
+  // Administrator
+  { id: 'user-admin-1', name: 'Sarah Connor', email: 'admin@itsm.local', role: 'ADMIN', badge: 'IT Manager', roleCategory: 'ADMIN', details: 'Full system governance & escalation override' },
+  // Technicians
+  { id: 'tech-101', name: 'Devon Vance', email: 'devon@itsm.local', role: 'TECHNICIAN', badge: 'DB Specialist', roleCategory: 'TECH', details: 'Postgres, SQL, Database locks' },
+  { id: 'tech-102', name: 'Maya Lin', email: 'maya@itsm.local', role: 'TECHNICIAN', badge: 'Network & Cloud', roleCategory: 'TECH', details: 'VPN, Cloud, Routing, Firewalls' },
+  { id: 'tech-103', name: 'Liam Gallagher', email: 'liam@itsm.local', role: 'TECHNICIAN', badge: 'App & Auth', roleCategory: 'TECH', details: 'SSO, SAML tokens, Application code' },
+  { id: 'tech-104', name: 'Marcus Reid', email: 'marcus@itsm.local', role: 'TECHNICIAN', badge: 'Infrastructure', roleCategory: 'TECH', details: 'Linux systems, Hardware, Racks' },
+  // Employees
+  { id: 'user-emp-1', name: 'Alice Smith', email: 'alice@company.com', role: 'EMPLOYEE', badge: 'Finance', roleCategory: 'EMP', details: 'Tuition debit & payment terminals' },
+  { id: 'user-emp-2', name: 'John Doe', email: 'john@company.com', role: 'EMPLOYEE', badge: 'Engineering', roleCategory: 'EMP', details: 'Engineering compile lab & Git mirrors' },
+  { id: 'user-emp-3', name: 'Carol Danvers', email: 'carol@company.com', role: 'EMPLOYEE', badge: 'Operations', roleCategory: 'EMP', details: 'Campus POS registers & logistics' },
+];
+
 export function App() {
   const [theme, setTheme] = useState<'dark' | 'light'>('dark');
   const [currentUser, setCurrentUser] = useState<AuthUser | null>(() => {
@@ -172,6 +186,9 @@ export function App() {
   const [newUrgency, setNewUrgency] = useState('HIGH');
   const [newStrategy, setNewStrategy] = useState('smart');
   const [detectedDuplicates, setDetectedDuplicates] = useState<any[]>([]);
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+  const [selectedIncidentIds, setSelectedIncidentIds] = useState<string[]>([]);
+  const [quickLoginRole, setQuickLoginRole] = useState<'ALL' | 'ADMIN' | 'TECH' | 'EMP'>('ALL');
 
   // Action input states
   const [actionNote, setActionNote] = useState('');
@@ -796,9 +813,11 @@ export function App() {
     return true;
   });
 
-  // Handle report incident
+  // Handle report incident (with submission guard to prevent spam click duplicates)
   const handleReport = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (isSubmittingReport) return;
+    setIsSubmittingReport(true);
     try {
       const res = await fetch(`${API_BASE}/incidents`, {
         method: 'POST',
@@ -825,6 +844,97 @@ export function App() {
       fetchData();
     } catch (err) {
       alert('Error creating incident: ' + err);
+    } finally {
+      setIsSubmittingReport(false);
+    }
+  };
+
+  // Delete a single incident
+  const handleDeleteIncident = async (id: string) => {
+    if (!confirm(`Are you sure you want to permanently delete incident ${id}?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/incidents/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        if (selectedIncident?.id === id) {
+          setSelectedIncident(null);
+        }
+        setSelectedIncidentIds(prev => prev.filter(x => x !== id));
+        fetchData();
+      } else {
+        const data = await res.json();
+        alert('Failed to delete incident: ' + (data.detail || 'Unknown error'));
+      }
+    } catch (err) {
+      alert('Network error deleting incident: ' + err);
+    }
+  };
+
+  // Batch delete multiple selected incidents
+  const handleBatchDelete = async () => {
+    if (selectedIncidentIds.length === 0) return;
+    if (!confirm(`Are you sure you want to delete ${selectedIncidentIds.length} selected incidents?`)) return;
+    try {
+      const res = await fetch(`${API_BASE}/incidents/batch-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ incident_ids: selectedIncidentIds })
+      });
+      const data = await res.json();
+      setSelectedIncidentIds([]);
+      if (selectedIncident && selectedIncidentIds.includes(selectedIncident.id)) {
+        setSelectedIncident(null);
+      }
+      fetchData();
+      alert(`Deleted ${data.deleted_count} incidents.`);
+    } catch (err) {
+      alert('Error during batch delete: ' + err);
+    }
+  };
+
+  // Clean up duplicate entries across system
+  const handleCleanupDuplicates = async () => {
+    if (!confirm('Scan and delete duplicate copies? This will retain 1 primary ticket per incident cluster and purge identical duplicate entries.')) return;
+    try {
+      const res = await fetch(`${API_BASE}/incidents/cleanup-duplicates`, { method: 'POST' });
+      const data = await res.json();
+      fetchData();
+      if (selectedIncident && data.deleted_ids && data.deleted_ids.includes(selectedIncident.id)) {
+        setSelectedIncident(null);
+      }
+      setSelectedIncidentIds([]);
+      alert(`Cleanup successful: removed ${data.cleaned_count} duplicate incident copies.`);
+    } catch (err) {
+      alert('Error during duplicate cleanup: ' + err);
+    }
+  };
+
+  // Clear email outbox
+  const handleClearOutbox = async () => {
+    if (!confirm('Clear all dispatched emails in the outbox?')) return;
+    try {
+      const res = await fetch(`${API_BASE}/notifications/clear-outbox`, { method: 'POST' });
+      const data = await res.json();
+      setOutboxEmails([]);
+      fetchNotifications();
+      alert(`Outbox cleared: ${data.cleared_count} messages purged.`);
+    } catch (err) {
+      alert('Error clearing outbox: ' + err);
+    }
+  };
+
+  // Reset database and reseed clean dummy records
+  const handleResetDatabase = async () => {
+    if (!confirm('Reset entire database and clear outbox? This wipes old accounts/incidents and reseeds realistic dummy users and tickets across all roles.')) return;
+    try {
+      const res = await fetch(`${API_BASE}/admin/reset-database`, { method: 'POST' });
+      const data = await res.json();
+      setSelectedIncident(null);
+      setSelectedIncidentIds([]);
+      fetchData();
+      fetchNotifications();
+      alert(data.message);
+    } catch (err) {
+      alert('Error resetting database: ' + err);
     }
   };
 
@@ -1091,45 +1201,98 @@ export function App() {
                 {authSubmitting ? 'Authenticating...' : 'Sign In to Workspace'} <ArrowRight size={16} />
               </button>
 
-              {/* Quick Evaluation Accounts Chips for Professors / Graders */}
-              <div style={{ marginTop: 10, paddingTop: 14, borderTop: '1px solid var(--border-subtle)' }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 10, textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-                  Quick Fill Test Accounts (Password: password123 / PASSWORD123)
+              {/* Quick Evaluation Accounts Chips for All Dummy Users */}
+              <div style={{ marginTop: 12, paddingTop: 14, borderTop: '1px solid var(--border-subtle)' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
+                    ⚡ 1-Click Quick Demo Login (pwd: password123)
+                  </div>
+                  <span style={{ fontSize: 10, background: 'rgba(249, 115, 22, 0.15)', color: 'var(--role-orange)', padding: '1px 6px', borderRadius: 4, fontWeight: 600 }}>
+                    8 Pre-Configured Users
+                  </span>
                 </div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div 
-                    className="auth-quick-chip"
-                    onClick={() => {
-                      setLoginEmail('alice@company.com');
-                      setLoginPassword('password123');
-                      handleLogin(undefined, 'alice@company.com', 'password123');
-                    }}
-                  >
-                    <span><strong>Alice Smith</strong> (Employee / Customer)</span>
-                    <span style={{ fontSize: 11, color: 'var(--role-orange)' }}>Login ➔</span>
-                  </div>
-                  <div 
-                    className="auth-quick-chip"
-                    onClick={() => {
-                      setLoginEmail('devon@itsm.local');
-                      setLoginPassword('password123');
-                      handleLogin(undefined, 'devon@itsm.local', 'password123');
-                    }}
-                  >
-                    <span><strong>Devon Vance</strong> (Technician / Support Eng)</span>
-                    <span style={{ fontSize: 11, color: 'var(--role-orange)' }}>Login ➔</span>
-                  </div>
-                  <div 
-                    className="auth-quick-chip"
-                    onClick={() => {
-                      setLoginEmail('admin@itsm.local');
-                      setLoginPassword('password123');
-                      handleLogin(undefined, 'admin@itsm.local', 'password123');
-                    }}
-                  >
-                    <span><strong>Sarah Connor</strong> (IT Administrator / Manager)</span>
-                    <span style={{ fontSize: 11, color: 'var(--role-orange)' }}>Login ➔</span>
-                  </div>
+
+                {/* Role Filter Tabs */}
+                <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                  {[
+                    { id: 'ALL', label: 'All (8)' },
+                    { id: 'ADMIN', label: 'Admin (1)' },
+                    { id: 'TECH', label: 'Techs (4)' },
+                    { id: 'EMP', label: 'Employees (3)' },
+                  ].map(tab => (
+                    <button
+                      key={tab.id}
+                      type="button"
+                      onClick={() => setQuickLoginRole(tab.id as any)}
+                      style={{
+                        flex: 1,
+                        padding: '4px 6px',
+                        fontSize: 10,
+                        fontWeight: 600,
+                        borderRadius: 6,
+                        border: '1px solid',
+                        borderColor: quickLoginRole === tab.id ? 'var(--role-orange)' : 'var(--border-subtle)',
+                        background: quickLoginRole === tab.id ? 'var(--role-orange-bg)' : 'transparent',
+                        color: quickLoginRole === tab.id ? 'var(--role-orange)' : 'var(--text-muted)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease'
+                      }}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Users List */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 185, overflowY: 'auto', paddingRight: 2 }}>
+                  {DUMMY_DEMO_USERS
+                    .filter(u => quickLoginRole === 'ALL' || u.roleCategory === quickLoginRole)
+                    .map(u => (
+                      <div 
+                        key={u.id}
+                        className="auth-quick-chip"
+                        onClick={() => {
+                          setLoginEmail(u.email);
+                          setLoginPassword('password123');
+                          handleLogin(undefined, u.email, 'password123');
+                        }}
+                        style={{ padding: '7px 10px' }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, overflow: 'hidden' }}>
+                          <div style={{
+                            width: 24,
+                            height: 24,
+                            borderRadius: '50%',
+                            background: u.role === 'ADMIN' ? 'rgba(239, 68, 68, 0.15)' : u.role === 'TECHNICIAN' ? 'rgba(59, 130, 246, 0.15)' : 'rgba(16, 185, 129, 0.15)',
+                            color: u.role === 'ADMIN' ? '#ef4444' : u.role === 'TECHNICIAN' ? '#3b82f6' : '#10b981',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: 10,
+                            fontWeight: 700,
+                            flexShrink: 0
+                          }}>
+                            {u.name.split(' ').map(n => n[0]).join('')}
+                          </div>
+                          <div style={{ overflow: 'hidden' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>
+                                {u.name}
+                              </span>
+                              <span className={`badge-state-${u.role.toLowerCase()}`} style={{ fontSize: 9, padding: '1px 5px', borderRadius: 3 }}>
+                                {u.badge}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 10, color: 'var(--text-muted)', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
+                              {u.email} &bull; {u.details}
+                            </div>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: 11, color: 'var(--role-orange)', fontWeight: 600, flexShrink: 0, marginLeft: 8 }}>
+                          Login ➔
+                        </span>
+                      </div>
+                    ))}
                 </div>
               </div>
             </form>
@@ -1496,7 +1659,7 @@ export function App() {
   }
 
   return (
-    <div style={{ display: 'flex', minHeight: '100vh', width: '100%' }}>
+    <div style={{ display: 'flex', height: '100vh', maxHeight: '100vh', width: '100%', overflow: 'hidden' }}>
       
       {/* ======================================================== */}
       {/* 1. LEFT SIDEBAR                                          */}
@@ -1504,16 +1667,19 @@ export function App() {
       <aside 
         style={{ 
           width: 260, 
+          height: '100vh',
+          maxHeight: '100vh',
           background: 'var(--bg-sidebar)', 
           borderRight: '1px solid var(--border-subtle)',
-          padding: '24px 18px',
+          padding: '20px 16px',
           display: 'flex',
           flexDirection: 'column',
           justifyContent: 'space-between',
-          flexShrink: 0
+          flexShrink: 0,
+          overflow: 'hidden'
         }}
       >
-        <div>
+        <div style={{ overflowY: 'auto', flex: 1, minHeight: 0, paddingRight: 4, marginBottom: 12 }}>
           {/* Logo & Brand: Conventional Server Infrastructure Icon */}
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid var(--border-subtle)' }}>
             <div style={{ width: 38, height: 38, borderRadius: 10, background: 'linear-gradient(135deg, #f97316, #ea580c)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 2px 10px rgba(249, 115, 22, 0.35)' }}>
@@ -1819,35 +1985,43 @@ export function App() {
           )}
         </div>
 
-        {/* Bottom Sidebar: Admin Config, SLA Daemon, Theme Switch */}
-        <div>
+        {/* Bottom Sidebar: Admin Config, SLA Daemon, Reset DB, Theme Switch */}
+        <div style={{ flexShrink: 0, paddingTop: 10, borderTop: '1px solid var(--border-subtle)' }}>
           {role === 'ADMIN' && (
             <>
               <button 
                 className="btn-secondary"
                 onClick={() => { fetchAdminConfig(); setShowAdminConfigModal(true); }}
-                style={{ width: '100%', marginBottom: 8, fontSize: 12, padding: '7px 10px', justifyContent: 'center', borderColor: 'rgba(249, 115, 22, 0.4)', color: 'var(--role-orange)' }}
+                style={{ width: '100%', marginBottom: 6, fontSize: 11, padding: '6px 10px', justifyContent: 'center', borderColor: 'rgba(249, 115, 22, 0.4)', color: 'var(--role-orange)' }}
               >
-                <Settings size={14} /> Admin Dynamic Config
+                <Settings size={13} /> Admin Dynamic Config
               </button>
               <button 
                 className="btn-secondary"
                 onClick={handleTriggerSLA}
-                style={{ width: '100%', marginBottom: 12, fontSize: 12, padding: '7px 10px', justifyContent: 'center' }}
+                style={{ width: '100%', marginBottom: 6, fontSize: 11, padding: '6px 10px', justifyContent: 'center' }}
               >
-                <RefreshCw size={14} /> Run SLA Daemon
+                <RefreshCw size={13} /> Run SLA Daemon
+              </button>
+              <button 
+                className="btn-secondary hover-danger"
+                onClick={handleResetDatabase}
+                style={{ width: '100%', marginBottom: 10, fontSize: 11, padding: '6px 10px', justifyContent: 'center', borderColor: 'rgba(244, 63, 94, 0.3)', color: '#f43f5e' }}
+                title="Reset database, clear outbox, and reseed clean dummy data"
+              >
+                <Trash2 size={13} /> Reset & Reseed DB
               </button>
             </>
           )}
 
-          {/* Theme Switch Pill (Replacing text "Toggle") */}
+          {/* Theme Switch Pill */}
           <div 
             onClick={toggleTheme}
             style={{
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              padding: '9px 12px',
+              padding: '8px 12px',
               borderRadius: 8,
               border: '1px solid var(--border-subtle)',
               background: 'var(--input-bg)',
@@ -1856,8 +2030,8 @@ export function App() {
               userSelect: 'none'
             }}
           >
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 500 }}>
-              {theme === 'dark' ? <Moon size={16} color="var(--role-orange)" /> : <Sun size={16} color="var(--role-orange)" />}
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 500 }}>
+              {theme === 'dark' ? <Moon size={15} color="var(--role-orange)" /> : <Sun size={15} color="var(--role-orange)" />}
               {theme === 'dark' ? 'Dark Mode' : 'Light Mode'}
             </span>
             <span className={`theme-switch-pill ${theme === 'dark' ? 'active' : ''}`}>
@@ -1870,7 +2044,7 @@ export function App() {
       {/* ======================================================== */}
       {/* 2. MAIN CONTENT AREA (Shrunk List + Expanded Right Pane) */}
       {/* ======================================================== */}
-      <main style={{ flex: 1, padding: '24px 30px', minWidth: 0, overflowY: 'auto' }}>
+      <main style={{ flex: 1, height: '100vh', maxHeight: '100vh', padding: '20px 24px', minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         
         {/* Top Control Bar: Search + Flat Selects (Matching Page Font) + Report Button */}
         {/* Top Control Bar: 5 Distinct Search & Filter Criteria + Header CTAs */}
@@ -2076,7 +2250,17 @@ export function App() {
               </button>
             )}
 
-            {role === 'EMPLOYEE' && (
+            <button 
+              className="btn-secondary"
+              onClick={handleCleanupDuplicates}
+              style={{ fontSize: 12, padding: '7px 11px', gap: 6, color: 'var(--role-orange)' }}
+              title="Scan and delete all redundant duplicate incident copies"
+            >
+              <AlertTriangle size={14} />
+              <span>Clean Duplicates</span>
+            </button>
+
+            {(role === 'EMPLOYEE' || role === 'ADMIN') && (
               <button 
                 className="btn-primary"
                 onClick={() => { setIsReportModalOpen(true); setDetectedDuplicates([]); }}
@@ -2089,157 +2273,256 @@ export function App() {
 
         {currentView === 'OVERVIEW' && (
           <>
-            {/* Metrics Banner (FileEdit Document Icon for Active Open Tickets) */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 22 }}>
-          <div className="glass-panel" style={{ padding: '16px 18px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 13, marginBottom: 6 }}>
-              <span>Total Incidents</span>
-              <FileText size={18} color="#3b82f6" />
-            </div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: 'var(--text-primary)' }}>{analytics?.total_incidents ?? 0}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Across all IT infrastructure</div>
-          </div>
-
-          {/* Active Open Tickets with Document/Notepad Writing Icon */}
-          <div className="glass-panel" style={{ padding: '16px 18px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 13, marginBottom: 6 }}>
-              <span>Active Open Tickets</span>
-              <FileEdit size={18} color="#f59e0b" />
-            </div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: '#f59e0b' }}>{analytics?.open_incidents ?? 0}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Assigned or in progress</div>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '16px 18px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 13, marginBottom: 6 }}>
-              <span>Critical Outages</span>
-              <AlertCircle size={18} color="#f43f5e" />
-            </div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: '#f43f5e' }}>{analytics?.critical_incidents ?? 0}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>5m response SLA target</div>
-          </div>
-
-          <div className="glass-panel" style={{ padding: '16px 18px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 13, marginBottom: 6 }}>
-              <span>SLA Violations</span>
-              <Clock size={18} color="#ef4444" />
-            </div>
-            <div style={{ fontSize: 26, fontWeight: 700, color: '#ef4444' }}>{analytics?.sla_violations ?? 0}</div>
-            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 2 }}>Automatic escalation enabled</div>
-          </div>
-        </div>
-
-        {/* Responsive Grid: Shrunk list (1fr) + Expanded Right Pane (530px) */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 530px', gap: 22, alignItems: 'start' }}>
-          
-          {/* Incidents List (Shrunk to make space for right pane) */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {filteredIncidents.length === 0 ? (
-              <div className="glass-panel" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
-                No incidents match the active criteria. Click "Report Incident" to log a new ticket.
+            {/* Metrics Banner */}
+            <div style={{ flexShrink: 0, display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 16 }}>
+              <div className="glass-panel" style={{ padding: '14px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+                  <span>Total Incidents</span>
+                  <FileText size={16} color="#3b82f6" />
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: 'var(--text-primary)' }}>{analytics?.total_incidents ?? 0}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Across all IT infrastructure</div>
               </div>
-            ) : (
-              filteredIncidents.map(inc => (
-                <div 
-                  key={inc.id}
-                  className={`glass-panel glass-panel-interactive`}
-                  onClick={() => {
-                    setSelectedIncident(inc);
-                    fetchSuggestedResolutions(inc.id);
-                  }}
 
-                  style={{
-                    padding: '14px 18px', cursor: 'pointer',
-                    borderColor: selectedIncident?.id === inc.id ? 'var(--role-orange)' : undefined,
-                    boxShadow: selectedIncident?.id === inc.id ? '0 0 16px rgba(249, 115, 22, 0.2)' : undefined
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--role-orange)', fontFamily: 'JetBrains Mono' }}>
-                        {inc.id}
-                      </span>
-                      <span className={`badge-${inc.priority.toLowerCase()}`} style={{ fontSize: 11, fontWeight: 700, padding: '2px 8px', borderRadius: 4 }}>
-                        {getPriorityLabel(inc.priority)}
-                      </span>
-                      <span className={`badge-state-${inc.status.toLowerCase()}`} style={{ fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 4 }}>
-                        {inc.status}
-                      </span>
-                      {inc.parent_incident_id && (
-                        <span style={{ fontSize: 11, background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', padding: '2px 8px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                          <AlertTriangle size={11} /> Correlated Duplicate
-                        </span>
-                      )}
-                    </div>
-                    <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                      {new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              <div className="glass-panel" style={{ padding: '14px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+                  <span>Active Open Tickets</span>
+                  <FileEdit size={16} color="#f59e0b" />
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#f59e0b' }}>{analytics?.open_incidents ?? 0}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Assigned or in progress</div>
+              </div>
+
+              <div className="glass-panel" style={{ padding: '14px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+                  <span>Critical Outages</span>
+                  <AlertCircle size={16} color="#f43f5e" />
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#f43f5e' }}>{analytics?.critical_incidents ?? 0}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>5m response SLA target</div>
+              </div>
+
+              <div className="glass-panel" style={{ padding: '14px 16px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', color: 'var(--text-secondary)', fontSize: 12, marginBottom: 4 }}>
+                  <span>SLA Violations</span>
+                  <Clock size={16} color="#ef4444" />
+                </div>
+                <div style={{ fontSize: 24, fontWeight: 700, color: '#ef4444' }}>{analytics?.sla_violations ?? 0}</div>
+                <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2 }}>Automatic escalation enabled</div>
+              </div>
+            </div>
+
+            {/* Responsive Workspace Grid: Independent scrolling for Incident list and Inspector */}
+            <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 530px', gap: 20, overflow: 'hidden' }}>
+              
+              {/* Incidents List Column (Independent Scroll) */}
+              <div style={{ height: '100%', overflowY: 'auto', paddingRight: 6, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Batch Selection & Clean Duplicates Header */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 12px', background: 'var(--input-bg)', borderRadius: 8, border: '1px solid var(--border-subtle)', flexShrink: 0 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={filteredIncidents.length > 0 && selectedIncidentIds.length === filteredIncidents.length}
+                      onChange={(e) => {
+                        if (e.target.checked) {
+                          setSelectedIncidentIds(filteredIncidents.map(i => i.id));
+                        } else {
+                          setSelectedIncidentIds([]);
+                        }
+                      }}
+                      style={{ cursor: 'pointer', accentColor: 'var(--role-orange)', width: 14, height: 14 }}
+                      title="Select / deselect all filtered tickets"
+                    />
+                    <span style={{ color: 'var(--text-secondary)', fontWeight: 500 }}>
+                      {selectedIncidentIds.length > 0 
+                        ? `${selectedIncidentIds.length} of ${filteredIncidents.length} selected`
+                        : `Incidents (${filteredIncidents.length})`}
                     </span>
                   </div>
 
-                  <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>{inc.title}</h3>
-                  <p style={{ fontSize: 13, color: 'var(--text-secondary)', marginBottom: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {inc.description}
-                  </p>
-
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12, color: 'var(--text-muted)' }}>
-                    <div style={{ display: 'flex', gap: 14 }}>
-                      <span>Service: <strong style={{ color: 'var(--text-primary)' }}>{inc.service.name}</strong></span>
-                      <span>Category: <strong style={{ color: 'var(--text-primary)' }}>{inc.category}</strong></span>
-                    </div>
-                    <div>
-                      {inc.assigned_technician ? (
-                        <span>Assigned to: <strong style={{ color: 'var(--role-orange)' }}>{inc.assigned_technician.name}</strong></span>
-                      ) : (
-                        <span style={{ color: '#f59e0b' }}>Pending Assignment</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-
-          {/* Right Column: Expanded Incident Inspector (Roomy & Clean, No Emojis) */}
-          <div>
-            {selectedIncident ? (
-              <div className="glass-panel" style={{ padding: 24, position: 'sticky', top: 24 }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
-                  <div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-                      <span style={{ fontSize: 13, fontFamily: 'JetBrains Mono', color: 'var(--role-orange)', fontWeight: 700 }}>
-                        {selectedIncident.id}
-                      </span>
-                      <span className={`badge-${selectedIncident.priority.toLowerCase()}`} style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4 }}>
-                        {getPriorityLabel(selectedIncident.priority)}
-                      </span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    {selectedIncidentIds.length > 0 && (
                       <button
-                        onClick={() => setShowPriorityMatrixModal(true)}
-                        style={{ background: 'transparent', border: '1px solid var(--border-subtle)', borderRadius: 4, padding: '2px 6px', fontSize: 10, color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
-                        title="View ITIL Priority Matrix"
+                        onClick={handleBatchDelete}
+                        className="btn-secondary hover-danger"
+                        style={{ fontSize: 11, padding: '4px 10px', color: '#f43f5e', borderColor: 'rgba(244,63,94,0.4)', gap: 4 }}
                       >
-                        <Sliders size={11} /> Priority Matrix
+                        <Trash2 size={13} />
+                        <span>Delete Selected ({selectedIncidentIds.length})</span>
                       </button>
-                      {role === 'ADMIN' && (
-                        <button
-                          onClick={() => {
-                            setOverridePriorityVal(selectedIncident.priority);
-                            setShowPriorityOverrideModal(true);
-                          }}
-                          style={{ background: 'transparent', border: '1px solid rgba(249, 115, 22, 0.4)', borderRadius: 4, padding: '2px 6px', fontSize: 10, color: 'var(--role-orange)', cursor: 'pointer', fontWeight: 600 }}
-                        >
-                          Override Priority
-                        </button>
-                      )}
-                    </div>
-                    <h2 style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>{selectedIncident.title}</h2>
+                    )}
+                    <button
+                      onClick={handleCleanupDuplicates}
+                      className="btn-secondary"
+                      style={{ fontSize: 11, padding: '4px 10px', color: 'var(--role-orange)', borderColor: 'rgba(249,115,22,0.4)', gap: 4 }}
+                      title="Scan and delete redundant duplicate copies"
+                    >
+                      <AlertTriangle size={13} />
+                      <span>Clean Duplicates</span>
+                    </button>
                   </div>
-                  <button 
-                    onClick={() => setSelectedIncident(null)}
-                    style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
-                  >
-                    <X size={18} />
-                  </button>
                 </div>
+
+                {filteredIncidents.length === 0 ? (
+                  <div className="glass-panel" style={{ padding: 48, textAlign: 'center', color: 'var(--text-muted)' }}>
+                    No incidents match the active criteria. Click "Report Incident" to log a new ticket.
+                  </div>
+                ) : (
+                  filteredIncidents.map(inc => (
+                    <div 
+                      key={inc.id}
+                      className={`glass-panel glass-panel-interactive`}
+                      onClick={() => {
+                        setSelectedIncident(inc);
+                        fetchSuggestedResolutions(inc.id);
+                      }}
+                      style={{
+                        padding: '13px 16px', cursor: 'pointer',
+                        borderColor: selectedIncident?.id === inc.id ? 'var(--role-orange)' : undefined,
+                        boxShadow: selectedIncident?.id === inc.id ? '0 0 16px rgba(249, 115, 22, 0.2)' : undefined
+                      }}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <input
+                            type="checkbox"
+                            checked={selectedIncidentIds.includes(inc.id)}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              e.stopPropagation();
+                              if (e.target.checked) {
+                                setSelectedIncidentIds(prev => [...prev, inc.id]);
+                              } else {
+                                setSelectedIncidentIds(prev => prev.filter(x => x !== inc.id));
+                              }
+                            }}
+                            style={{ cursor: 'pointer', accentColor: 'var(--role-orange)', width: 14, height: 14 }}
+                          />
+                          <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--role-orange)', fontFamily: 'JetBrains Mono' }}>
+                            {inc.id}
+                          </span>
+                          <span className={`badge-${inc.priority.toLowerCase()}`} style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 4 }}>
+                            {getPriorityLabel(inc.priority)}
+                          </span>
+                          <span className={`badge-state-${inc.status.toLowerCase()}`} style={{ fontSize: 10, fontWeight: 600, padding: '2px 7px', borderRadius: 4 }}>
+                            {inc.status}
+                          </span>
+                          {inc.parent_incident_id && (
+                            <span style={{ fontSize: 10, background: 'rgba(239, 68, 68, 0.12)', color: '#ef4444', padding: '2px 7px', borderRadius: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                              <AlertTriangle size={11} /> Correlated Duplicate
+                            </span>
+                          )}
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                          <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+                            {new Date(inc.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDeleteIncident(inc.id);
+                            }}
+                            className="hover-danger"
+                            style={{
+                              background: 'transparent',
+                              border: 'none',
+                              color: 'var(--text-muted)',
+                              cursor: 'pointer',
+                              padding: '2px 4px',
+                              borderRadius: 4,
+                              display: 'flex',
+                              alignItems: 'center'
+                            }}
+                            title={`Delete incident ${inc.id}`}
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </div>
+
+                      <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 4, color: 'var(--text-primary)' }}>{inc.title}</h3>
+                      <p style={{ fontSize: 12, color: 'var(--text-secondary)', marginBottom: 8, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {inc.description}
+                      </p>
+
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+                        <div style={{ display: 'flex', gap: 12 }}>
+                          <span>Service: <strong style={{ color: 'var(--text-primary)' }}>{inc.service.name}</strong></span>
+                          <span>Category: <strong style={{ color: 'var(--text-primary)' }}>{inc.category}</strong></span>
+                        </div>
+                        <div>
+                          {inc.assigned_technician ? (
+                            <span>Assigned: <strong style={{ color: 'var(--role-orange)' }}>{inc.assigned_technician.name}</strong></span>
+                          ) : (
+                            <span style={{ color: '#f59e0b' }}>Pending Assignment</span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Right Column: Incident Details Inspector (Independent Scroll) */}
+              <div style={{ height: '100%', overflowY: 'auto', paddingRight: 6 }}>
+                {selectedIncident ? (
+                  <div className="glass-panel" style={{ padding: 22 }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+                      <div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                          <span style={{ fontSize: 13, fontFamily: 'JetBrains Mono', color: 'var(--role-orange)', fontWeight: 700 }}>
+                            {selectedIncident.id}
+                          </span>
+                          <span className={`badge-${selectedIncident.priority.toLowerCase()}`} style={{ fontSize: 11, fontWeight: 700, padding: '2px 6px', borderRadius: 4 }}>
+                            {getPriorityLabel(selectedIncident.priority)}
+                          </span>
+                          <button
+                            onClick={() => setShowPriorityMatrixModal(true)}
+                            style={{ background: 'transparent', border: '1px solid var(--border-subtle)', borderRadius: 4, padding: '2px 6px', fontSize: 10, color: 'var(--text-secondary)', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4 }}
+                            title="View ITIL Priority Matrix"
+                          >
+                            <Sliders size={11} /> Priority Matrix
+                          </button>
+                          {role === 'ADMIN' && (
+                            <button
+                              onClick={() => {
+                                setOverridePriorityVal(selectedIncident.priority);
+                                setShowPriorityOverrideModal(true);
+                              }}
+                              style={{ background: 'transparent', border: '1px solid rgba(249, 115, 22, 0.4)', borderRadius: 4, padding: '2px 6px', fontSize: 10, color: 'var(--role-orange)', cursor: 'pointer', fontWeight: 600 }}
+                            >
+                              Override Priority
+                            </button>
+                          )}
+                        </div>
+                        <h2 style={{ fontSize: 17, fontWeight: 700, color: 'var(--text-primary)' }}>{selectedIncident.title}</h2>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <button
+                          onClick={() => handleDeleteIncident(selectedIncident.id)}
+                          className="btn-secondary hover-danger"
+                          style={{
+                            padding: '4px 8px',
+                            fontSize: 11,
+                            color: '#f43f5e',
+                            borderColor: 'rgba(244, 63, 94, 0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: 4
+                          }}
+                          title="Permanently delete this incident"
+                        >
+                          <Trash2 size={13} />
+                          <span>Delete</span>
+                        </button>
+                        <button 
+                          onClick={() => setSelectedIncident(null)}
+                          style={{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}
+                        >
+                          <X size={18} />
+                        </button>
+                      </div>
+                    </div>
 
                 {/* Incident Progression Lifecycle */}
                 <div style={{ background: 'var(--input-bg)', padding: '12px 14px', borderRadius: 8, marginBottom: 16, border: '1px solid var(--border-subtle)' }}>
@@ -3268,8 +3551,14 @@ export function App() {
                 <button type="button" className="btn-secondary" onClick={() => setIsReportModalOpen(false)}>
                   Cancel
                 </button>
-                <button type="submit" className="btn-primary">
-                  Submit Incident
+                <button 
+                  type="submit" 
+                  className="btn-primary" 
+                  disabled={isSubmittingReport}
+                  style={{ opacity: isSubmittingReport ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 6 }}
+                >
+                  {isSubmittingReport && <RefreshCw size={14} className="animate-spin" />}
+                  {isSubmittingReport ? 'Submitting Incident...' : 'Submit Incident'}
                 </button>
               </div>
             </form>
@@ -3491,21 +3780,35 @@ export function App() {
             </div>
 
             {/* Tabs: Outbox List vs Test Real Email */}
-            <div style={{ display: 'flex', gap: 8, borderBottom: '1px solid var(--border-subtle)', marginBottom: 16 }}>
-              <button
-                className={`auth-tab-btn ${outboxActiveTab === 'OUTBOX' ? 'active' : ''}`}
-                onClick={() => setOutboxActiveTab('OUTBOX')}
-                style={{ padding: '8px 14px' }}
-              >
-                Dispatched Outbox ({outboxEmails.length})
-              </button>
-              <button
-                className={`auth-tab-btn ${outboxActiveTab === 'TEST' ? 'active' : ''}`}
-                onClick={() => setOutboxActiveTab('TEST')}
-                style={{ padding: '8px 14px' }}
-              >
-                Test Real Email Dispatch
-              </button>
+            {/* Tabs: Outbox List vs Test Real Email vs Clear Outbox */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-subtle)', marginBottom: 16 }}>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className={`auth-tab-btn ${outboxActiveTab === 'OUTBOX' ? 'active' : ''}`}
+                  onClick={() => setOutboxActiveTab('OUTBOX')}
+                  style={{ padding: '8px 14px' }}
+                >
+                  Dispatched Outbox ({outboxEmails.length})
+                </button>
+                <button
+                  className={`auth-tab-btn ${outboxActiveTab === 'TEST' ? 'active' : ''}`}
+                  onClick={() => setOutboxActiveTab('TEST')}
+                  style={{ padding: '8px 14px' }}
+                >
+                  Test Real Email Dispatch
+                </button>
+              </div>
+              {outboxEmails.length > 0 && (
+                <button
+                  onClick={handleClearOutbox}
+                  className="btn-secondary hover-danger"
+                  style={{ padding: '5px 10px', fontSize: 11, color: '#f43f5e', borderColor: 'rgba(244,63,94,0.3)', display: 'flex', alignItems: 'center', gap: 4 }}
+                  title="Purge all dispatched emails from outbox"
+                >
+                  <Trash2 size={12} />
+                  <span>Clear Outbox</span>
+                </button>
+              )}
             </div>
 
             {outboxActiveTab === 'OUTBOX' ? (

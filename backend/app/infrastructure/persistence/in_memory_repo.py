@@ -52,6 +52,12 @@ class InMemoryIncidentRepository(IIncidentRepository):
     def count(self) -> int:
         return len(self._storage)
 
+    def delete(self, incident_id: str) -> bool:
+        if incident_id in self._storage:
+            del self._storage[incident_id]
+            return True
+        return False
+
 
 class InMemoryUserRepository(IUserRepository):
     """In-memory user and technician repository."""

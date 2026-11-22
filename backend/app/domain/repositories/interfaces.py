@@ -33,6 +33,10 @@ class IIncidentRepository(ABC):
     def count(self) -> int:
         pass
 
+    @abstractmethod
+    def delete(self, incident_id: str) -> bool:
+        pass
+
 
 class IUserRepository(ABC):
     """Repository Pattern interface for User & Technician persistence."""

@@ -227,6 +227,16 @@ class SqliteIncidentRepository(IIncidentRepository):
         with self.session_factory() as session:
             return session.query(IncidentModel).count()
 
+    def delete(self, incident_id: str) -> bool:
+        with self.session_factory() as session:
+            model = session.query(IncidentModel).filter_by(id=incident_id).first()
+            if not model:
+                return False
+            session.query(AuditModel).filter_by(incident_id=incident_id).delete()
+            session.delete(model)
+            session.commit()
+            return True
+
     @staticmethod
     def _ensure_utc(dt: Optional[datetime]) -> Optional[datetime]:
         if dt is None:

@@ -399,3 +399,75 @@ class IncidentService:
             "operational_services": len([n for n in nodes if n["health"] == "OPERATIONAL"])
         }
 
+    def delete_incident(self, incident_id: str) -> bool:
+        """Deletes an incident and decrements assigned technician workload if active."""
+        inc = self.incident_repo.get_by_id(incident_id)
+        if not inc:
+            return False
+
+        # Release active technician workload if applicable
+        if inc.assigned_technician and inc.status.value in ("ASSIGNED", "ACKNOWLEDGED", "IN_PROGRESS"):
+            tech = self.user_repo.get_by_id(inc.assigned_technician.id)
+            if tech and hasattr(tech, "release_ticket"):
+                tech.release_ticket()
+                self.user_repo.save(tech)
+
+        return self.incident_repo.delete(incident_id)
+
+    def batch_delete_incidents(self, incident_ids: List[str]) -> Dict[str, Any]:
+        """Deletes multiple incidents by ID."""
+        deleted = []
+        for inc_id in incident_ids:
+            if self.delete_incident(inc_id):
+                deleted.append(inc_id)
+        return {"deleted_count": len(deleted), "deleted_ids": deleted}
+
+    def cleanup_duplicates(self) -> Dict[str, Any]:
+        """
+        Cleans up redundant duplicate incidents in the system.
+        Keeps one primary ticket per group of duplicates and deletes the redundant copies.
+        """
+        all_incidents = self.incident_repo.get_all()
+        to_delete = set()
+
+        # 1. Any explicitly marked duplicate whose duplicate_of_id or parent_incident_id exists
+        for inc in all_incidents:
+            if inc.is_duplicate and inc.duplicate_of_id:
+                to_delete.add(inc.id)
+            elif inc.parent_incident_id and inc.id != inc.parent_incident_id:
+                to_delete.add(inc.id)
+
+        # 2. Correlated identical title + service duplicates
+        from collections import defaultdict
+        groups = defaultdict(list)
+        for inc in all_incidents:
+            if inc.id not in to_delete:
+                norm_title = (inc.title or "").strip().lower()
+                srv_id = inc.service.id if inc.service else ""
+                groups[(norm_title, srv_id)].append(inc)
+
+        status_ranks = {
+            "CLOSED": 6, "VERIFIED": 5, "RESOLVED": 4,
+            "IN_PROGRESS": 3, "ACKNOWLEDGED": 2, "ASSIGNED": 1, "NEW": 0
+        }
+        for (norm_title, srv_id), inc_list in groups.items():
+            if len(inc_list) > 1:
+                # Sort best candidate first (highest progression, then earliest created)
+                inc_list.sort(
+                    key=lambda x: (
+                        status_ranks.get(x.status.value if hasattr(x.status, "value") else str(x.status), 0),
+                        -x.created_at.timestamp() if x.created_at else 0
+                    ),
+                    reverse=True
+                )
+                # Keep inc_list[0], delete remaining copies
+                for dup in inc_list[1:]:
+                    to_delete.add(dup.id)
+
+        deleted = []
+        for inc_id in to_delete:
+            if self.delete_incident(inc_id):
+                deleted.append(inc_id)
+
+        return {"cleaned_count": len(deleted), "deleted_ids": deleted}
+

@@ -1,5 +1,6 @@
 import os
 import smtplib
+import threading
 import uuid
 from datetime import datetime, timezone
 from email.mime.multipart import MIMEMultipart
@@ -79,35 +80,6 @@ class EmailService:
         status = "DELIVERED_OUTBOX"
         smtp_error = None
 
-        # Attempt Real SMTP if configured in environment
-        smtp_host = os.environ.get("SMTP_HOST")
-        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
-        smtp_user = os.environ.get("SMTP_USER")
-        smtp_pass = os.environ.get("SMTP_PASSWORD")
-        smtp_from = os.environ.get("SMTP_FROM", "noreply@itsm.local")
-
-        if smtp_host and smtp_host.strip():
-            try:
-                msg = MIMEMultipart("alternative")
-                msg["Subject"] = subject
-                msg["From"] = smtp_from
-                msg["To"] = ", ".join(to_addresses)
-
-                if body_text:
-                    msg.attach(MIMEText(body_text, "plain"))
-                if body_html:
-                    msg.attach(MIMEText(body_html, "html"))
-
-                with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
-                    server.starttls()
-                    if smtp_user and smtp_pass:
-                        server.login(smtp_user, smtp_pass)
-                    server.sendmail(smtp_from, to_addresses, msg.as_string())
-                status = "DELIVERED_SMTP"
-            except Exception as e:
-                status = "DELIVERED_OUTBOX_SMTP_FAILED"
-                smtp_error = str(e)
-
         notification = EmailNotification(
             to_addresses=to_addresses,
             subject=subject,
@@ -122,7 +94,45 @@ class EmailService:
         if len(self.outbox) > 200:
             self.outbox.pop()
 
+        # Attempt Real SMTP asynchronously in a daemon thread so it NEVER blocks API requests
+        smtp_host = os.environ.get("SMTP_HOST")
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        smtp_user = os.environ.get("SMTP_USER")
+        smtp_pass = os.environ.get("SMTP_PASSWORD")
+        smtp_from = os.environ.get("SMTP_FROM", "noreply@itsm.local")
+
+        if smtp_host and smtp_host.strip():
+            def _async_send():
+                try:
+                    msg = MIMEMultipart("alternative")
+                    msg["Subject"] = subject
+                    msg["From"] = smtp_from
+                    msg["To"] = ", ".join(to_addresses)
+
+                    if body_text:
+                        msg.attach(MIMEText(body_text, "plain"))
+                    if body_html:
+                        msg.attach(MIMEText(body_html, "html"))
+
+                    with smtplib.SMTP(smtp_host, smtp_port, timeout=3.0) as server:
+                        server.starttls()
+                        if smtp_user and smtp_pass:
+                            server.login(smtp_user, smtp_pass)
+                        server.sendmail(smtp_from, to_addresses, msg.as_string())
+                    notification.status = "DELIVERED_SMTP"
+                except Exception as e:
+                    notification.status = "DELIVERED_OUTBOX_SMTP_FAILED"
+                    notification.smtp_error = str(e)
+
+            threading.Thread(target=_async_send, daemon=True).start()
+
         return notification
+
+    def clear_outbox(self) -> int:
+        """Clears all stored emails from the outbox."""
+        count = len(self.outbox)
+        self.outbox.clear()
+        return count
 
     def get_all(self, recipient: Optional[str] = None) -> List[Dict[str, Any]]:
         if not recipient:
