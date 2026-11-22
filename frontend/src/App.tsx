@@ -331,7 +331,12 @@ export function App() {
         throw new Error(data.detail || 'Failed to dispatch verification code');
       }
       setRegStep('VERIFY_CODE');
-      setAuthSuccess(`A 6-digit security verification code has been dispatched to ${regEmail}. Please enter the code below to finalize your account.`);
+      if (data.demo_otp) {
+        setRegCode(data.demo_otp);
+        setAuthSuccess(`A 6-digit verification code has been dispatched to ${regEmail}. (Demo code: ${data.demo_otp})`);
+      } else {
+        setAuthSuccess(`A 6-digit security verification code has been dispatched to ${regEmail}. Please enter the code below to finalize your account.`);
+      }
     } catch (err: any) {
       setAuthError(err.message || 'Failed to send verification code');
     } finally {
@@ -391,7 +396,12 @@ export function App() {
       if (!res.ok) {
         throw new Error(data.detail || 'Failed to resend code');
       }
-      setAuthSuccess(`A fresh 6-digit verification code was dispatched to ${regEmail}. Check your inbox or Outbox preview.`);
+      if (data.demo_otp) {
+        setRegCode(data.demo_otp);
+        setAuthSuccess(`A new 6-digit verification code has been dispatched to ${regEmail}. (Demo code: ${data.demo_otp})`);
+      } else {
+        setAuthSuccess(`A new 6-digit verification code has been dispatched to ${regEmail}.`);
+      }
     } catch (err: any) {
       setAuthError(err.message || 'Failed to resend code');
     } finally {
@@ -1512,44 +1522,7 @@ export function App() {
                       {regResending ? 'Resending...' : 'Resend Code'}
                     </button>
                   </div>
-
-                  {!smtpConfigured && (
-                    <div style={{
-                      marginTop: 10,
-                      padding: '8px 12px',
-                      background: 'rgba(59, 130, 246, 0.08)',
-                      border: '1px solid rgba(59, 130, 246, 0.25)',
-                      borderRadius: 8,
-                      fontSize: 11,
-                      color: 'var(--text-secondary)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between'
-                    }}>
-                      <span>Demo/Local Mode: Code stored in Outbox.</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setShowNotificationOutbox(true);
-                          fetchNotifications();
-                        }}
-                        style={{
-                          background: 'linear-gradient(135deg, #3b82f6, #2563eb)',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: 4,
-                          padding: '3px 8px',
-                          fontSize: 11,
-                          cursor: 'pointer',
-                          fontWeight: 600
-                        }}
-                      >
-                        Inspect Code
-                      </button>
-                    </div>
-                  )}
                 </div>
-
 
                 <button 
                   type="submit" 
@@ -1565,10 +1538,6 @@ export function App() {
                 >
                   {authSubmitting ? 'Verifying Code...' : 'Verify Code & Enter Workspace'} <ArrowRight size={16} />
                 </button>
-
-                <div style={{ padding: 10, borderRadius: 8, background: 'rgba(255,255,255,0.02)', border: '1px dashed var(--border-subtle)', fontSize: 11, color: 'var(--text-muted)', lineHeight: 1.4 }}>
-                  💡 <strong>Testing Locally?</strong> Dispatched verification codes can also be inspected directly in the <strong>Dispatched Email Outbox</strong> or system notification stream.
-                </div>
               </form>
             )
           ) : (

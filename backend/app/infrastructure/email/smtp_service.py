@@ -72,10 +72,15 @@ class EmailService:
         subject: str,
         body_html: str,
         body_text: str = "",
-        notification_type: str = "GENERAL"
+        notification_type: str = "GENERAL",
+        record_in_outbox: bool = True
     ) -> EmailNotification:
         if not to_addresses:
             to_addresses = ["it-notifications@enterprise.local"]
+
+        # Security policy: OTP verification codes must never be stored in the public outbox
+        if notification_type == "EMAIL_VERIFICATION" or "verification code" in subject.lower():
+            record_in_outbox = False
 
         status = "DELIVERED_OUTBOX"
         smtp_error = None
@@ -89,10 +94,11 @@ class EmailService:
             status=status,
             smtp_error=smtp_error
         )
-        self.outbox.insert(0, notification)
-        # Cap outbox history at 200 items
-        if len(self.outbox) > 200:
-            self.outbox.pop()
+        if record_in_outbox:
+            self.outbox.insert(0, notification)
+            # Cap outbox history at 200 items
+            if len(self.outbox) > 200:
+                self.outbox.pop()
 
         # Attempt Real SMTP asynchronously in a daemon thread so it NEVER blocks API requests
         smtp_host = os.environ.get("SMTP_HOST")
@@ -172,11 +178,18 @@ class EmailService:
         return count
 
     def get_all(self, recipient: Optional[str] = None) -> List[Dict[str, Any]]:
+        # Security: Only generated issue/incident notifications must be visible in the outbox.
+        # OTP verification codes are strictly confidential and must never be exposed.
+        filtered = [
+            n for n in self.outbox
+            if getattr(n, "notification_type", "") != "EMAIL_VERIFICATION"
+            and "verification code" not in getattr(n, "subject", "").lower()
+        ]
         if not recipient:
-            return [n.to_dict() for n in self.outbox]
+            return [n.to_dict() for n in filtered]
         recip_clean = recipient.strip().lower()
         return [
-            n.to_dict() for n in self.outbox
+            n.to_dict() for n in filtered
             if any(recip_clean in addr.lower() for addr in n.to_addresses)
         ]
 

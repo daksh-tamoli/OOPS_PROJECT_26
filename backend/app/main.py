@@ -549,7 +549,8 @@ def send_verification(req: SendVerificationRequest):
         "status": "code_sent",
         "message": f"6-digit verification code has been dispatched to {norm_email}.",
         "email": norm_email,
-        "expires_in_minutes": 10
+        "expires_in_minutes": 10,
+        "demo_otp": code if not EmailService().smtp_configured else None
     }
 
 
@@ -659,7 +660,8 @@ def resend_verification_code(req: ResendCodeRequest):
 
     return {
         "status": "code_resent",
-        "message": f"A new 6-digit verification code has been dispatched to {norm_email}."
+        "message": f"A new 6-digit verification code has been dispatched to {norm_email}.",
+        "demo_otp": new_code if not EmailService().smtp_configured else None
     }
 
 
