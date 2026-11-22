@@ -12,8 +12,14 @@ frontend/dist/
 .DS_Store
 .env
 *.env
+
+# Non-Code Documents & Demo Artifacts (only code and README.md are committed)
+*.pdf
 DEMO_SCRIPT.md
 DEMO_SCRIPT.pdf
+FINAL_DEMO_SCRIPT.md
+PROJECT_REPORT.md
 PROJECT_REPORT.pdf
-frontend.pdf
+TEAM_ROLES_AND_CODE_WALKTHROUGH.md
+docs/
 

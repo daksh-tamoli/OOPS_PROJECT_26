@@ -83,6 +83,6 @@ PYTHONPATH=. pytest backend/tests/test_oops_requirements.py -v
 
 ---
 
-## Documentation
+## Documentation & Deliverables
 
-Full problem analysis, priority algorithm specification, architecture and UML diagrams (Use Case, Class, ER), database schema, security architecture, technology justification, and the 25-case test matrix are available in [PROJECT_REPORT.md](./PROJECT_REPORT.md).
+Full problem analysis, priority algorithm specification, architecture and UML diagrams (Use Case, Class, ER), database schema, security architecture, technology justification, and the 25-case test matrix are documented in the comprehensive project technical report (`I-ITSM Group 75 Comprehensive Technical Report.pdf`).
