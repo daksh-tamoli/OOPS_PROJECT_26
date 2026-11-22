@@ -12,7 +12,7 @@ class DuplicateIncidentDetector:
     - Jaccard Token Overlap
     - Domain Service Context Boost
     """
-    def __init__(self, similarity_threshold: float = 0.35):
+    def __init__(self, similarity_threshold: float = 0.20):
         self.similarity_threshold = similarity_threshold
 
     def find_potential_duplicates(

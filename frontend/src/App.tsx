@@ -186,6 +186,7 @@ export function App() {
   const [newUrgency, setNewUrgency] = useState('HIGH');
   const [newStrategy, setNewStrategy] = useState('smart');
   const [detectedDuplicates, setDetectedDuplicates] = useState<any[]>([]);
+  const [reportError, setReportError] = useState('');
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [selectedIncidentIds, setSelectedIncidentIds] = useState<string[]>([]);
   const [quickLoginRole, setQuickLoginRole] = useState<'ALL' | 'ADMIN' | 'TECH' | 'EMP'>('ALL');
@@ -253,6 +254,34 @@ export function App() {
       localStorage.removeItem('itsm_auth_token');
     }
   }, [currentUser]);
+
+  // Live duplicate detection as user types in report incident modal (debounced)
+  useEffect(() => {
+    if (!isReportModalOpen || newTitle.trim().length < 3) {
+      setDetectedDuplicates([]);
+      return;
+    }
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`${API_BASE}/incidents/check-duplicates`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: newTitle,
+            description: newDesc,
+            service_id: newServiceId
+          })
+        });
+        if (res.ok) {
+          const data = await res.json();
+          setDetectedDuplicates(data.duplicates_detected || []);
+        }
+      } catch {
+        // ignore background duplicate check errors
+      }
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [newTitle, newDesc, newServiceId, isReportModalOpen]);
 
   // Auth Operations
   const handleLogin = async (e?: React.FormEvent, customEmail?: string, customPass?: string) => {
@@ -827,14 +856,25 @@ export function App() {
   const handleReport = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmittingReport) return;
+
+    if (!newTitle || newTitle.trim().length < 3) {
+      setReportError('Incident title must be at least 3 characters long.');
+      return;
+    }
+    if (!newDesc || !newDesc.trim()) {
+      setReportError('Incident description cannot be empty.');
+      return;
+    }
+
+    setReportError('');
     setIsSubmittingReport(true);
     try {
       const res = await fetch(`${API_BASE}/incidents`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: newTitle,
-          description: newDesc,
+          title: newTitle.trim(),
+          description: newDesc.trim(),
           service_id: newServiceId,
           reporter_id: currentUser?.id || 'user-emp-1',
           impact: newImpact,
@@ -844,16 +884,33 @@ export function App() {
         })
       });
       const data = await res.json();
-      if (data.duplicates_detected && data.duplicates_detected.length > 0) {
-        setDetectedDuplicates(data.duplicates_detected);
-      } else {
-        setIsReportModalOpen(false);
-        setNewTitle('');
-        setNewDesc('');
+      if (!res.ok) {
+        let msg = 'Failed to report incident';
+        if (data.detail) {
+          if (typeof data.detail === 'string') {
+            msg = data.detail;
+          } else if (Array.isArray(data.detail)) {
+            msg = data.detail.map((d: any) => {
+              const field = d.loc ? d.loc[d.loc.length - 1] : '';
+              return field ? `${field}: ${d.msg}` : d.msg;
+            }).join(', ');
+          }
+        }
+        setReportError(msg);
+        return;
       }
-      fetchData();
-    } catch (err) {
-      alert('Error creating incident: ' + err);
+
+      setIsReportModalOpen(false);
+      setNewTitle('');
+      setNewDesc('');
+      setDetectedDuplicates([]);
+      setReportError('');
+      await fetchData();
+      if (data.incident) {
+        setSelectedIncident(data.incident);
+      }
+    } catch (err: any) {
+      setReportError('Error creating incident: ' + (err.message || err));
     } finally {
       setIsSubmittingReport(false);
     }
@@ -2232,7 +2289,7 @@ export function App() {
             {(role === 'EMPLOYEE' || role === 'ADMIN') && (
               <button 
                 className="btn-primary"
-                onClick={() => { setIsReportModalOpen(true); setDetectedDuplicates([]); }}
+                onClick={() => { setIsReportModalOpen(true); setDetectedDuplicates([]); setReportError(''); }}
               >
                 <PlusCircle size={16} /> Report Incident
               </button>
@@ -3398,6 +3455,14 @@ export function App() {
               </button>
             </div>
 
+            {/* Error Banner if submission failed */}
+            {reportError && (
+              <div style={{ background: 'rgba(239, 68, 68, 0.15)', border: '1px solid #ef4444', borderRadius: 8, padding: '10px 14px', marginBottom: 14, color: '#fca5a5', fontSize: 13, display: 'flex', alignItems: 'center', gap: 8 }}>
+                <AlertCircle size={16} color="#ef4444" style={{ flexShrink: 0 }} />
+                <span>{reportError}</span>
+              </div>
+            )}
+
             {/* Duplicate Incident Warning Alert if found */}
             {detectedDuplicates.length > 0 && (
               <div style={{ background: 'rgba(239, 68, 68, 0.12)', border: '1px solid rgba(239, 68, 68, 0.35)', borderRadius: 8, padding: '12px 14px', marginBottom: 16 }}>
@@ -3441,14 +3506,15 @@ export function App() {
 
               <div>
                 <label style={{ display: 'block', fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)', marginBottom: 6 }}>
-                  Incident Summary / Title
+                  Incident Summary / Title <span style={{ color: 'var(--text-muted)', fontWeight: 400 }}>(min 3 characters)</span>
                 </label>
                 <input 
                   type="text" 
                   required
+                  minLength={3}
                   placeholder="e.g. Payment application unavailable during checkout"
                   value={newTitle}
-                  onChange={e => setNewTitle(e.target.value)}
+                  onChange={e => { setNewTitle(e.target.value); setReportError(''); }}
                   className="flat-input"
                 />
               </div>
@@ -3459,10 +3525,11 @@ export function App() {
                 </label>
                 <textarea 
                   required
+                  minLength={1}
                   rows={3}
                   placeholder="Describe what occurred, affected users, and error codes..."
                   value={newDesc}
-                  onChange={e => setNewDesc(e.target.value)}
+                  onChange={e => { setNewDesc(e.target.value); setReportError(''); }}
                   className="flat-input"
                 />
               </div>
@@ -3527,7 +3594,7 @@ export function App() {
                   style={{ opacity: isSubmittingReport ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 6 }}
                 >
                   {isSubmittingReport && <RefreshCw size={14} className="animate-spin" />}
-                  {isSubmittingReport ? 'Submitting Incident...' : 'Submit Incident'}
+                  {isSubmittingReport ? 'Submitting Incident...' : 'Submit Incident Report'}
                 </button>
               </div>
             </form>

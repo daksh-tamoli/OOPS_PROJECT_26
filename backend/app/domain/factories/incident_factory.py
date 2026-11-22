@@ -34,8 +34,8 @@ class IncidentFactory:
         from backend.app.domain.exceptions import InvalidUserInputException, MissingSLAConfigException
         if not title or len(title.strip()) < 3:
             raise InvalidUserInputException("Incident title must be at least 3 characters long.")
-        if not description or len(description.strip()) < 5:
-            raise InvalidUserInputException("Incident description must be at least 5 characters long.")
+        if not description or not description.strip():
+            raise InvalidUserInputException("Incident description cannot be empty.")
         if not service or not getattr(service, "sla_policy", None):
             raise MissingSLAConfigException(f"Service '{getattr(service, 'name', 'Unknown')}' lacks an SLA policy configuration.")
 

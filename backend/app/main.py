@@ -341,7 +341,7 @@ class TestEmailRequest(BaseModel):
 
 class IncidentCreateRequest(BaseModel):
     title: str = Field(..., min_length=3)
-    description: str = Field(..., min_length=5)
+    description: str = Field(..., min_length=1)
     service_id: str
     reporter_id: str
     impact: Impact = Impact.MEDIUM
@@ -349,6 +349,12 @@ class IncidentCreateRequest(BaseModel):
     category: Optional[str] = None
     assignment_strategy: str = "smart"
     auto_assign: bool = True
+
+
+class DuplicateCheckRequest(BaseModel):
+    title: str = Field(..., min_length=1)
+    description: str = ""
+    service_id: Optional[str] = None
 
 
 class BatchDeleteRequest(BaseModel):
@@ -941,6 +947,39 @@ def get_incident(incident_id: str):
         return serialize_incident(inc)
     except EntityNotFoundException as e:
         raise HTTPException(status_code=404, detail=str(e))
+
+
+@app.post("/api/incidents/check-duplicates")
+def check_incident_duplicates(req: DuplicateCheckRequest):
+    service = service_repo.get_by_id(req.service_id) if req.service_id else None
+    if not service:
+        services = service_repo.get_all()
+        service = services[0] if services else None
+
+    if not service:
+        return {"duplicates_detected": []}
+
+    existing_incidents = incident_repo.get_all()
+    from backend.app.domain.models.incident import Incident
+    from backend.app.domain.models.sla import SLATarget
+    reporter = user_repo.get_by_id("user-emp-1") or (user_repo.get_all()[0] if user_repo.get_all() else None)
+    if not reporter:
+        return {"duplicates_detected": []}
+
+    temp_inc = Incident(
+        title=req.title.strip(),
+        description=req.description.strip() if req.description else req.title.strip(),
+        service=service,
+        reporter=reporter,
+        priority=Priority.P3,
+        sla_target=SLATarget(60, 480)
+    )
+    duplicates = incident_service.duplicate_detector.find_potential_duplicates(temp_inc, existing_incidents)
+    return {
+        "duplicates_detected": [
+            {"id": d[0].id, "title": d[0].title, "similarity": d[1]} for d in duplicates
+        ]
+    }
 
 
 @app.post("/api/incidents", status_code=status.HTTP_201_CREATED)
