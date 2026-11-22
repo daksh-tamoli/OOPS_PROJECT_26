@@ -128,6 +128,43 @@ class EmailService:
 
         return notification
 
+    def send_email_sync(
+        self,
+        to_addresses: List[str],
+        subject: str,
+        body_html: str,
+        body_text: str = ""
+    ) -> EmailNotification:
+        """Synchronously attempts SMTP network transport delivery and raises NetworkFailureException on error."""
+        from backend.app.domain.exceptions import NetworkFailureException
+        smtp_host = os.environ.get("SMTP_HOST")
+        smtp_port = int(os.environ.get("SMTP_PORT", "587"))
+        smtp_user = os.environ.get("SMTP_USER")
+        smtp_pass = os.environ.get("SMTP_PASSWORD")
+        smtp_from = os.environ.get("SMTP_FROM", "noreply@itsm.local")
+
+        if not smtp_host or not smtp_host.strip():
+            raise NetworkFailureException("SMTP host not configured; cannot establish network connection.")
+        try:
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = smtp_from
+            msg["To"] = ", ".join(to_addresses)
+            if body_text:
+                msg.attach(MIMEText(body_text, "plain"))
+            if body_html:
+                msg.attach(MIMEText(body_html, "html"))
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=3.0) as server:
+                server.starttls()
+                if smtp_user and smtp_pass:
+                    server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_from, to_addresses, msg.as_string())
+            notif = EmailNotification(to_addresses, subject, body_html, body_text, "MANUAL", status="DELIVERED_SMTP")
+            self.outbox.insert(0, notif)
+            return notif
+        except Exception as e:
+            raise NetworkFailureException(f"SMTP network transport delivery failed: {e}")
+
     def clear_outbox(self) -> int:
         """Clears all stored emails from the outbox."""
         count = len(self.outbox)

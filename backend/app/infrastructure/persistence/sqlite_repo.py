@@ -4,8 +4,10 @@ from typing import List, Optional
 from sqlalchemy import (
     create_engine, Column, String, Integer, Float, Boolean, DateTime, Text, ForeignKey, JSON, text
 )
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker, relationship
 
+from backend.app.domain.exceptions import DatabaseFailureException
 from backend.app.domain.repositories.interfaces import (
     IIncidentRepository, IUserRepository, IServiceRepository
 )
@@ -176,7 +178,11 @@ class SqliteIncidentRepository(IIncidentRepository):
                         timestamp=audit.timestamp
                     ))
 
-            session.commit()
+            try:
+                session.commit()
+            except SQLAlchemyError as e:
+                session.rollback()
+                raise DatabaseFailureException(f"Database operation failed on incident save: {e}")
             return incident
 
     def get_by_id(self, incident_id: str) -> Optional[Incident]:
@@ -336,7 +342,11 @@ class SqliteUserRepository(IUserRepository):
                 model.experience_years = user.experience_years
                 model.performance_rating = user.performance_rating
 
-            session.commit()
+            try:
+                session.commit()
+            except SQLAlchemyError as e:
+                session.rollback()
+                raise DatabaseFailureException(f"Database operation failed on user save: {e}")
             return user
 
     def get_by_id(self, user_id: str) -> Optional[User]:
@@ -427,7 +437,11 @@ class SqliteServiceRepository(IServiceRepository):
                 model.dependencies = json.dumps(service.dependencies)
             except Exception:
                 model.dependencies = "[]"
-            session.commit()
+            try:
+                session.commit()
+            except SQLAlchemyError as e:
+                session.rollback()
+                raise DatabaseFailureException(f"Database operation failed on service save: {e}")
             return service
 
     def get_by_id(self, service_id: str) -> Optional[ITService]:

@@ -734,15 +734,6 @@ CREATE TABLE services (
     is_active BOOLEAN DEFAULT 1
 );
 
--- SLA Threshold Targets per Priority Tier
-CREATE TABLE sla_policies (
-    id VARCHAR(64) PRIMARY KEY,
-    service_id VARCHAR(64) REFERENCES services(id),
-    priority VARCHAR(16) NOT NULL CHECK (priority IN ('P1', 'P2', 'P3', 'P4')),
-    response_time_minutes INTEGER NOT NULL,
-    resolution_time_minutes INTEGER NOT NULL
-);
-
 -- Core Incidents Aggregate Entity
 CREATE TABLE incidents (
     id VARCHAR(64) PRIMARY KEY,
@@ -768,9 +759,7 @@ CREATE TABLE incidents (
     investigation_notes TEXT, -- JSON serialized diagnostic log entries
     resolution_details TEXT,
     resolution_feedback TEXT,
-    additional_info TEXT, -- Collaborative notes and employee responses
-    reopen_count INTEGER DEFAULT 0,
-    satisfaction_rating INTEGER CHECK (satisfaction_rating BETWEEN 1 AND 5),
+    parent_incident_id VARCHAR(64),
     is_duplicate BOOLEAN DEFAULT 0,
     duplicate_of_id VARCHAR(64)
 );
@@ -787,46 +776,40 @@ CREATE TABLE audit_records (
     description TEXT NOT NULL,
     timestamp TIMESTAMP NOT NULL
 );
-
--- Live In-App Notification Center
-CREATE TABLE in_app_notifications (
-    id VARCHAR(64) PRIMARY KEY,
-    user_id VARCHAR(64) NOT NULL REFERENCES users(id),
-    title VARCHAR(256) NOT NULL,
-    message TEXT NOT NULL,
-    severity VARCHAR(32) DEFAULT 'INFO',
-    incident_id VARCHAR(64) REFERENCES incidents(id),
-    is_read BOOLEAN DEFAULT 0,
-    created_at TIMESTAMP NOT NULL
-);
 ```
 
-#### 5.4.2 Representative Sample Data
+*Note: SLA Policies are encapsulated as domain composition objects on `ITService.sla_policy` (`SLAPolicy`), while live in-app notifications are maintained in real-time by the active session observer (`InAppNotificationObserver`).*
+
+#### 5.4.2 Representative Sample Data (From Seeded Enterprise Database)
 **Table: `users`**
 
 | id | email | full_name | role | department | skills | max_load | current_load | is_available |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `usr-emp-01` | `alice.chen@enterprise.io` | Alice Chen | `EMPLOYEE` | Finance | `[]` | 5 | 0 | 1 |
-| `usr-tech-01`| `devon.vance@enterprise.io` | Devon Vance | `TECHNICIAN` | Cloud Ops | `["database","sql","postgres"]` | 5 | 2 | 1 |
-| `usr-tech-02`| `marcus.reid@enterprise.io` | Marcus Reid | `TECHNICIAN` | Network Eng | `["network","dns","vpn"]` | 5 | 1 | 1 |
-| `usr-adm-01` | `sarah.connor@enterprise.io`| Sarah Connor | `ADMIN` | IT Governance | `["governance","management"]` | 10 | 0 | 1 |
+| `user-admin-1` | `admin@itsm.local` | Sarah Connor (IT Manager) | `ADMIN` | IT Governance | `[]` | 10 | 0 | 1 |
+| `user-emp-1` | `alice@company.com` | Alice Smith (Finance) | `EMPLOYEE` | Finance | `[]` | 5 | 0 | 1 |
+| `user-emp-2` | `john@company.com` | John Doe (Engineering) | `EMPLOYEE` | Engineering | `[]` | 5 | 0 | 1 |
+| `tech-101` | `devon@itsm.local` | Devon Vance (DB Specialist) | `TECHNICIAN` | Database Ops | `["database","sql","storage"]` | 4 | 2 | 1 |
+| `tech-102` | `maya@itsm.local` | Maya Lin (Network & Cloud) | `TECHNICIAN` | Network Eng | `["network","cloud","security"]` | 5 | 1 | 1 |
+| `tech-103` | `liam@itsm.local` | Liam Gallagher (App & Auth) | `TECHNICIAN` | App Services | `["application","authentication"]` | 3 | 1 | 1 |
 
 **Table: `services`**
 
 | id | name | description | tier | dependencies | is_active |
 | :--- | :--- | :--- | :--- | :--- | :--- |
-| `srv-db` | Core Database Cluster | High-availability PostgreSQL cluster | `TIER_1_CRITICAL` | `[]` | 1 |
-| `srv-pay`| Payment Processing Bridge| Stripe & campus POS payment gateway | `TIER_1_CRITICAL` | `["srv-db"]` | 1 |
-| `srv-vpn`| Global Corporate VPN | WireGuard campus remote access | `TIER_2` | `[]` | 1 |
-| `srv-mail`| Internal Mail Relay | Postfix & Exchange SMTP gateway | `TIER_3` | `["srv-db"]` | 1 |
+| `srv-db` | Core PostgreSQL DB | Primary organizational relational database clusters | `TIER_1_CRITICAL` | `[]` | 1 |
+| `srv-payment` | Payment Gateway | Processes credit cards, UPI, and banking transactions | `TIER_1_CRITICAL` | `["srv-db", "srv-auth"]` | 1 |
+| `srv-auth` | Single Sign-On (SSO) | Central authentication and LDAP service | `TIER_1_CRITICAL` | `["srv-db"]` | 1 |
+| `srv-cloud` | Cloud Storage & CDN | S3 buckets and media delivery assets | `TIER_2` | `["srv-auth"]` | 1 |
+| `srv-email` | Internal Mail Exchange | Corporate messaging and communication | `TIER_3` | `["srv-cloud"]` | 1 |
 
 **Table: `incidents`**
 
 | id | title | category | service_id | reporter_id | assigned_id | priority | current_state | is_breached |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `inc-8910` | Payment API Deadlock | Payment | `srv-pay` | `usr-emp-01` | `usr-tech-01` | `P1` | `IN_PROGRESS` | 0 |
-| `inc-8911` | VPN Routing Drop | Network | `srv-vpn` | `usr-emp-01` | `usr-tech-02` | `P2` | `RESOLVED` | 0 |
-| `inc-8912` | Invoice PDF Export Error| Database | `srv-db` | `usr-emp-01` | `usr-tech-01` | `P3` | `VERIFIED` | 0 |
+| `INC-1001` | Payment Gateway Timeout on Checkout | Payment | `srv-payment` | `user-emp-1` | `tech-101` | `P1` | `IN_PROGRESS` | 0 |
+| `INC-1002` | SSO SAML Signing Token Validation Failure | Authentication | `srv-auth` | `user-emp-2` | `tech-103` | `P2` | `ACKNOWLEDGED` | 0 |
+| `INC-1004` | PostgreSQL Connection Pool Exhaustion | Database | `srv-db` | `user-emp-2` | `tech-101` | `P1` | `RESOLVED` | 0 |
+| `INC-1005` | Internal Email Relay Queuing Delay | General | `srv-email` | `user-emp-1` | `tech-102` | `P4` | `VERIFIED` | 0 |
 
 #### 5.4.3 Important Relational Integrity & Foreign Keys (Deliverable 7)
 

@@ -114,6 +114,9 @@ class IncidentService:
         potential_duplicates = self.duplicate_detector.find_potential_duplicates(incident, existing_incidents)
         if potential_duplicates:
             top_dup, top_score = potential_duplicates[0]
+            if getattr(self, "enforce_duplicate_prevention", False) and top_score >= 0.90:
+                from backend.app.domain.exceptions import DuplicateIncidentException
+                raise DuplicateIncidentException(f"Exact duplicate incident already active: '{top_dup.id}' ({top_dup.title}).")
             incident.parent_incident_id = top_dup.id
             incident.record_action(
                 actor=reporter,
@@ -200,8 +203,32 @@ class IncidentService:
         actor = self.user_repo.get_by_id(actor_id)
         if not actor:
             raise EntityNotFoundException("Actor not found.")
+        if not is_confirmed and not (feedback and feedback.strip()):
+            from backend.app.domain.exceptions import InvalidUserInputException
+            raise InvalidUserInputException("Reopening an incident requires explanatory feedback.")
 
         incident.verify(is_confirmed, actor, feedback)
+        self.incident_repo.save(incident)
+        return incident
+
+    def link_duplicate(self, incident_id: str, parent_id: str, actor_id: str) -> Incident:
+        """Explicitly links an incident as duplicate of another incident."""
+        if incident_id == parent_id:
+            from backend.app.domain.exceptions import DuplicateIncidentException
+            raise DuplicateIncidentException("Cannot link incident as a duplicate of itself.")
+        incident = self.get_incident(incident_id)
+        parent = self.get_incident(parent_id)
+        actor = self.user_repo.get_by_id(actor_id)
+        if not actor:
+            raise EntityNotFoundException("Actor not found.")
+        incident.parent_incident_id = parent.id
+        incident.is_duplicate = True
+        incident.duplicate_of_id = parent.id
+        incident.record_action(
+            actor=actor,
+            action="DUPLICATE_LINKED",
+            description=f"Manually linked as duplicate of parent incident '{parent.id}'"
+        )
         self.incident_repo.save(incident)
         return incident
 

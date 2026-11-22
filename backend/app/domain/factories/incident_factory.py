@@ -31,6 +31,14 @@ class IncidentFactory:
         category: Optional[str] = None,
         explicit_priority: Optional[Priority] = None
     ) -> Incident:
+        from backend.app.domain.exceptions import InvalidUserInputException, MissingSLAConfigException
+        if not title or len(title.strip()) < 3:
+            raise InvalidUserInputException("Incident title must be at least 3 characters long.")
+        if not description or len(description.strip()) < 5:
+            raise InvalidUserInputException("Incident description must be at least 5 characters long.")
+        if not service or not getattr(service, "sla_policy", None):
+            raise MissingSLAConfigException(f"Service '{getattr(service, 'name', 'Unknown')}' lacks an SLA policy configuration.")
+
         # Inferred category if none supplied
         resolved_category = category or self.categorizer.suggest_category(title, description).value
 

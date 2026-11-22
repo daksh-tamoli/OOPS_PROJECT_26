@@ -21,7 +21,7 @@ class SLAPolicy:
     ):
         self.id = policy_id or str(uuid.uuid4())
         self.name = name
-        self.targets: Dict[Priority, SLATarget] = targets or self._default_targets()
+        self.targets: Dict[Priority, SLATarget] = targets if targets is not None else self._default_targets()
 
     @staticmethod
     def _default_targets() -> Dict[Priority, SLATarget]:
@@ -38,7 +38,10 @@ class SLAPolicy:
         }
 
     def get_target(self, priority: Priority) -> SLATarget:
-        return self.targets.get(priority, self.targets[Priority.P3])
+        if priority not in self.targets:
+            from backend.app.domain.exceptions import MissingSLAConfigException
+            raise MissingSLAConfigException(f"Missing SLA configuration for priority tier '{getattr(priority, 'value', priority)}'.")
+        return self.targets[priority]
 
     def update_target(self, priority: Priority, response_minutes: int, resolution_minutes: int) -> None:
         """Dynamically update SLA target for a specific priority tier."""

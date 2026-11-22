@@ -583,7 +583,7 @@ def test_tc23_service_dependency_topology(test_setup):
     assert "Upstream dependency" in node_map[srv_payment.id]["cascade_reason"]
 
 
-def test_tc24_all_12_custom_exceptions_verification():
+def test_tc24_all_12_custom_exceptions_verification(test_setup):
     """Requirement: Explicit custom exception handling for all 12 rubric failure cases."""
     from backend.app.domain.exceptions import (
         DomainException,
@@ -602,6 +602,9 @@ def test_tc24_all_12_custom_exceptions_verification():
         NetworkFailureException,
         InvalidUserInputException
     )
+    from backend.app.domain.factories.incident_factory import IncidentFactory
+    from backend.app.domain.models.sla import SLAPolicy
+    from backend.app.infrastructure.email.smtp_service import EmailService
 
     exceptions_to_verify = [
         InvalidLoginException("1. Invalid login attempt"),
@@ -625,6 +628,53 @@ def test_tc24_all_12_custom_exceptions_verification():
     # Verify Aliases
     assert UnauthorizedOperationException is UnauthorizedActionException
     assert TechnicianCapacityExceededException is WorkloadExceededException
+
+    s = test_setup["service"]
+    emp = test_setup["emp"]
+    tech = test_setup["tech_db"]
+
+    # 1. InvalidUserInputException: title too short
+    factory = IncidentFactory()
+    with pytest.raises(InvalidUserInputException):
+        factory.create_incident(title="ab", description="too short title", service=test_setup["srv_payment"], reporter=emp)
+
+    # 2. ServiceNotFoundException
+    with pytest.raises(ServiceNotFoundException):
+        s.report_incident(title="Broken Service", description="Non existent srv", service_id="srv-nonexistent", reporter_id=emp.id)
+
+    # 3. InvalidIncidentException
+    with pytest.raises(InvalidIncidentException):
+        s.get_incident("INC-999999")
+
+    # 4. DuplicateIncidentException
+    with pytest.raises(DuplicateIncidentException):
+        s.link_duplicate("INC-FAKE-1", "INC-FAKE-1", emp.id)
+
+    # 5. MissingSLAConfigException
+    empty_policy = SLAPolicy(name="Empty Policy", targets={})
+    with pytest.raises(MissingSLAConfigException):
+        empty_policy.get_target(Priority.P1)
+
+    # 6. UnauthorizedActionException: Employee cannot acknowledge
+    inc, _ = s.report_incident(title="Test Ticket", description="Valid description here", service_id=test_setup["srv_payment"].id, reporter_id=emp.id, auto_assign=False)
+    with pytest.raises(UnauthorizedActionException):
+        s.acknowledge_incident(inc.id, emp.id)
+
+    # 7. InvalidStateTransitionException
+    with pytest.raises(InvalidStateTransitionException):
+        inc.close(test_setup["admin"])
+
+    # 8. TechnicianUnavailableException
+    tech.is_available = False
+    with pytest.raises(TechnicianUnavailableException):
+        tech.allocate_ticket()
+    tech.is_available = True
+
+    # 9. WorkloadExceededException
+    tech.current_active_load = tech.max_active_load
+    with pytest.raises(WorkloadExceededException):
+        tech.allocate_ticket()
+    tech.current_active_load = 0
 
 
 def test_tc25_dual_notification_channels_verification(test_setup):

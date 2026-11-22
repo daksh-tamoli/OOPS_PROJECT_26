@@ -15,6 +15,7 @@ from pydantic import BaseModel, Field
 from backend.app.domain.models.enums import UserRole, IncidentStatus, Priority, Impact, Urgency, ServiceTier
 from backend.app.domain.models.user import Employee, Technician, Administrator, User
 from backend.app.domain.models.service import ITService
+from backend.app.domain.models.sla import SLAStatusTracker, SLAPolicy, SLATarget
 from backend.app.domain.exceptions import (
     DomainException,
     EntityNotFoundException,
@@ -23,6 +24,7 @@ from backend.app.domain.exceptions import (
     InvalidStateTransitionException,
     InvalidLoginException,
     UnauthorizedActionException,
+    TechnicianUnavailableException,
     WorkloadExceededException,
     MissingSLAConfigException,
     DuplicateIncidentException,
@@ -43,6 +45,8 @@ app = FastAPI(
     version="1.0.0"
 )
 
+from fastapi.responses import JSONResponse
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -51,6 +55,113 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ==============================================================================
+# Domain Exception Handlers (Mapping All 12 Custom Exceptions to Clean HTTP Responses)
+# ==============================================================================
+
+@app.exception_handler(InvalidLoginException)
+def invalid_login_handler(request, exc: InvalidLoginException):
+    return JSONResponse(
+        status_code=401,
+        content={"detail": exc.message, "error_type": "InvalidLoginException"}
+    )
+
+@app.exception_handler(UnauthorizedActionException)
+def unauthorized_action_handler(request, exc: UnauthorizedActionException):
+    return JSONResponse(
+        status_code=403,
+        content={"detail": exc.message, "error_type": "UnauthorizedActionException"}
+    )
+
+@app.exception_handler(ServiceNotFoundException)
+def service_not_found_handler(request, exc: ServiceNotFoundException):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": exc.message, "error_type": "ServiceNotFoundException"}
+    )
+
+@app.exception_handler(InvalidIncidentException)
+def invalid_incident_handler(request, exc: InvalidIncidentException):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": exc.message, "error_type": "InvalidIncidentException"}
+    )
+
+@app.exception_handler(EntityNotFoundException)
+def entity_not_found_handler(request, exc: EntityNotFoundException):
+    return JSONResponse(
+        status_code=404,
+        content={"detail": exc.message, "error_type": exc.__class__.__name__}
+    )
+
+@app.exception_handler(InvalidStateTransitionException)
+def invalid_state_transition_handler(request, exc: InvalidStateTransitionException):
+    return JSONResponse(
+        status_code=409,
+        content={
+            "detail": exc.message,
+            "error_type": "InvalidStateTransitionException",
+            "from_state": getattr(exc, "from_state", ""),
+            "to_state": getattr(exc, "to_state", "")
+        }
+    )
+
+@app.exception_handler(TechnicianUnavailableException)
+def tech_unavailable_handler(request, exc: TechnicianUnavailableException):
+    return JSONResponse(
+        status_code=409,
+        content={"detail": exc.message, "error_type": "TechnicianUnavailableException"}
+    )
+
+@app.exception_handler(WorkloadExceededException)
+def workload_exceeded_handler(request, exc: WorkloadExceededException):
+    return JSONResponse(
+        status_code=409,
+        content={"detail": exc.message, "error_type": "WorkloadExceededException"}
+    )
+
+@app.exception_handler(DuplicateIncidentException)
+def duplicate_incident_handler(request, exc: DuplicateIncidentException):
+    return JSONResponse(
+        status_code=409,
+        content={"detail": exc.message, "error_type": "DuplicateIncidentException"}
+    )
+
+@app.exception_handler(MissingSLAConfigException)
+def missing_sla_config_handler(request, exc: MissingSLAConfigException):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.message, "error_type": "MissingSLAConfigException"}
+    )
+
+@app.exception_handler(InvalidUserInputException)
+def invalid_user_input_handler(request, exc: InvalidUserInputException):
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.message, "error_type": "InvalidUserInputException"}
+    )
+
+@app.exception_handler(DatabaseFailureException)
+def database_failure_handler(request, exc: DatabaseFailureException):
+    return JSONResponse(
+        status_code=500,
+        content={"detail": exc.message, "error_type": "DatabaseFailureException"}
+    )
+
+@app.exception_handler(NetworkFailureException)
+def network_failure_handler(request, exc: NetworkFailureException):
+    return JSONResponse(
+        status_code=502,
+        content={"detail": exc.message, "error_type": "NetworkFailureException"}
+    )
+
+@app.exception_handler(DomainException)
+def domain_exception_handler(request, exc: DomainException):
+    return JSONResponse(
+        status_code=400,
+        content={"detail": exc.message, "error_type": exc.__class__.__name__}
+    )
 
 # Repositories & Services with SQLite Persistent Storage (Repository Pattern)
 from backend.app.infrastructure.persistence.sqlite_repo import (
@@ -374,20 +485,11 @@ def health_check():
 def login(req: LoginRequest):
     user = user_repo.get_by_email(req.email)
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid login: No account found with this corporate email address."
-        )
+        raise InvalidLoginException("Invalid login: No account found with this corporate email address.")
     if not user.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is inactive or suspended. Contact IT administrator."
-        )
+        raise UnauthorizedActionException("Account is inactive or suspended. Contact IT administrator.")
     if not user.verify_password(req.password):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid login: Incorrect password entered."
-        )
+        raise InvalidLoginException("Invalid login: Incorrect password entered.")
     return {
         "status": "authenticated",
         "token": f"token-{user.id}-{uuid.uuid4().hex[:8]}",
@@ -841,33 +943,30 @@ def get_incident(incident_id: str):
 
 @app.post("/api/incidents", status_code=status.HTTP_201_CREATED)
 def report_incident(req: IncidentCreateRequest):
-    try:
-        inc, duplicates = incident_service.report_incident(
-            title=req.title,
-            description=req.description,
-            service_id=req.service_id,
-            reporter_id=req.reporter_id,
-            impact=req.impact,
-            urgency=req.urgency,
-            category=req.category,
-            auto_assign=req.auto_assign,
-            assignment_strategy=req.assignment_strategy if req.assignment_strategy != "smart" else incident_service.get_default_assignment_strategy()
-        )
-        return {
-            "incident": serialize_incident(inc),
-            "duplicates_detected": [
-                {"id": d[0].id, "title": d[0].title, "similarity": d[1]} for d in duplicates
-            ]
-        }
-    except DomainException as e:
-        raise HTTPException(status_code=400, detail=str(e))
+    inc, duplicates = incident_service.report_incident(
+        title=req.title,
+        description=req.description,
+        service_id=req.service_id,
+        reporter_id=req.reporter_id,
+        impact=req.impact,
+        urgency=req.urgency,
+        category=req.category,
+        auto_assign=req.auto_assign,
+        assignment_strategy=req.assignment_strategy if req.assignment_strategy != "smart" else incident_service.get_default_assignment_strategy()
+    )
+    return {
+        "incident": serialize_incident(inc),
+        "duplicates_detected": [
+            {"id": d[0].id, "title": d[0].title, "similarity": d[1]} for d in duplicates
+        ]
+    }
 
 
 @app.delete("/api/incidents/{incident_id}")
 def delete_incident(incident_id: str):
     success = incident_service.delete_incident(incident_id)
     if not success:
-        raise HTTPException(status_code=404, detail=f"Incident {incident_id} not found")
+        raise InvalidIncidentException(f"Incident {incident_id} not found")
     return {"message": f"Incident {incident_id} deleted successfully", "deleted": True}
 
 
@@ -1054,15 +1153,15 @@ def reset_database():
 def override_priority(incident_id: str, req: PriorityOverrideRequest):
     inc = incident_repo.get_by_id(incident_id)
     if not inc:
-        raise HTTPException(status_code=404, detail=f"Incident with ID '{incident_id}' not found.")
+        raise InvalidIncidentException(f"Incident with ID '{incident_id}' not found.")
     admin = user_repo.get_by_id(req.admin_id)
     if not admin or admin.role != UserRole.ADMIN:
-        raise HTTPException(status_code=403, detail="Unauthorized: Only Administrators can manually override incident priority.")
+        raise UnauthorizedActionException("Unauthorized: Only Administrators can manually override incident priority.")
 
     old_p = inc.priority.value
     inc.priority = req.new_priority
-    from backend.app.domain.models.sla_tracker import SLATracker
-    inc.sla_tracker = SLATracker(priority=req.new_priority)
+    target = inc.service.sla_policy.get_target(req.new_priority)
+    inc.sla_tracker = SLAStatusTracker(created_at=inc.created_at, target=target)
     inc.record_action(
         actor=admin,
         action="PRIORITY_OVERRIDDEN",
